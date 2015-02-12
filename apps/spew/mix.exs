@@ -35,7 +35,8 @@ defmodule Spew.Mixfile do
   # Type `mix help deps` for more examples and options
   defp deps do
     [
-      spewbuild: [in_umbrella: true]
+      {:spewbuild, [in_umbrella: true]},
+      {:exquery, github: "lafka/exquery", app: false}
     ]
   end
 end

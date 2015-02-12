@@ -59,6 +59,17 @@ defmodule Spew.Appliance do
     def reset, do: GenServer.call(@name, :reset)
   end
 
+  defmodule NoRuntime do
+    defexception message: "can't find runtime",
+                 query: nil
+  end
+
+  defmodule ConfigError do
+    defexception param: nil,
+                 file: nil,
+                 message: "setting read-only parameter"
+  end
+
   defmodule Item do
     defstruct [
       ref: nil,                             # the actual id of the appliance
@@ -86,17 +97,13 @@ defmodule Spew.Appliance do
 
     alias Spew.Utils
     alias Spew.Appliance.Item
+    alias Spew.Appliance.NoRuntime
+    alias Spew.Appliance.ConfigError
 
     defmodule State do
       defstruct appliances: %{},
                 names: %{},
                 files: %{}
-    end
-
-    defmodule ConfigError do
-      defexception param: nil,
-                   file: nil,
-                   message: "setting read-only parameter"
     end
 
     def start_link do
@@ -130,9 +137,8 @@ defmodule Spew.Appliance do
 
       e in [TokenMissingError, SyntaxError] ->
         {:reply, {:error, {:syntax, e.file}}, state}
-
       e in ConfigError ->
-        {:reply, {:error, {:param, e.param, e.file}}, state}
+        {:reply, {:error, e}, state}
     end
 
     def handle_call({:add, name, runtime, instance, enabled?}, _from, state) do
@@ -147,7 +153,8 @@ defmodule Spew.Appliance do
           }
 
           ref = Utils.hash appliance
-          appliance = %{appliance | ref: ref}
+          appliance = %{appliance | ref: ref,
+                                    appliance: find_runtime(runtime)}
 
           {:reply,
             {:ok, appliance},
@@ -158,6 +165,9 @@ defmodule Spew.Appliance do
         [{ref, _} | _] ->
           {:reply, {:error, {:conflict, {:appliance, :ref, ref}}}, state}
       end
+
+    rescue e in NoRuntime ->
+      {:reply, {:error, e}, state}
     end
 
     def handle_call({:get, ref}, _from, state) do
@@ -210,7 +220,7 @@ defmodule Spew.Appliance do
         {:reply, {:error, {:syntax, e.file}}, state}
 
       e in ConfigError ->
-        {:reply, {:error, {:param, e.param, e.file}}, state}
+        {:reply, {:error, e}, state}
     end
 
     def handle_call({:unloadfiles, files}, _from, state) do
@@ -282,12 +292,28 @@ defmodule Spew.Appliance do
         cfg[:appliance] && raise ConfigError, file: file, param: :appliance
 
         ref = Utils.hash cfg
-        val = Map.merge %Item{}, Map.put(cfg, :ref, ref)
+        val = Map.merge %Item{}, cfg
+        val = %{val | ref: Map.put(cfg, :ref, ref),
+                      appliance: find_runtime(val.runtime)}
 
         files = Map.put files, file, [ref | files[file] || []]
         apps = Map.put_new apps, ref, val
 
         {files, apps}
+      end
+    end
+
+    defp find_runtime(""), do: {nil, nil}
+    defp find_runtime(nil), do: {nil, nil}
+    defp find_runtime(query) do
+      q = ExQuery.Query.from_string query
+      {:ok, builds} = Spew.Build.list
+      case Enum.filter Map.values(builds), q do
+        [] ->
+          raise NoRuntime, query: query
+
+        [build | _] ->
+          {build["TYPE"], build}
       end
     end
   end

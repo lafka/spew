@@ -3,6 +3,9 @@ defmodule SpewApplianceTest do
 
   alias Spew.Appliance
 
+  alias Spew.Appliance.NoRuntime
+  alias Spew.Appliance.ConfigError
+
 
   setup do
     Appliance.reset
@@ -54,14 +57,14 @@ defmodule SpewApplianceTest do
     {:error, {:notfound, {:appliance, "void"}}} = Appliance.get "void"
     :ok = Appliance.loadfiles ["./test/appliances/void.exs"]
 
-    {:ok, void} = Appliance.get "void"
+    {:ok, _void} = Appliance.get "void"
   end
 
   test "config: unload file" do
     {:error, {:notfound, {:appliance, "void"}}} = Appliance.get "void"
     :ok = Appliance.loadfiles ["./test/appliances/void.exs"]
 
-    {:ok, void} = Appliance.get "void"
+    {:ok, _void} = Appliance.get "void"
     :ok = Appliance.unloadfiles ["./test/appliances/void.exs"]
 
     {:error, {:notfound, {:appliance, "void"}}} = Appliance.get "void"
@@ -70,10 +73,17 @@ defmodule SpewApplianceTest do
 
   test "config: refute access to `appliance` and `ref`" do
     assert {:error, {:syntax, _}} = Appliance.loadfiles ["./test/priv/broken-appliance-syntax.exs"]
-    assert {:error, {:param, :appliance, _}} = Appliance.loadfiles ["./test/priv/broken-appliance.exs"]
-    assert {:error, {:param, :ref, _}} = Appliance.loadfiles ["./test/priv/broken-appliance-ref.exs"]
+    assert {:error, %ConfigError{}} = Appliance.loadfiles ["./test/priv/broken-appliance.exs"]
+    assert {:error, %ConfigError{}} = Appliance.loadfiles ["./test/priv/broken-appliance-ref.exs"]
   end
 
   test "find runtime" do
+    {:ok, app} = Appliance.add "dont-find-runtime", "", %{}, true
+    assert {nil, nil} == app.appliance
+
+    assert {:error, %NoRuntime{}} = Appliance.add "no-find-runtime", "TARGET == 0", %{}, true
+
+    {:ok, app} = Appliance.add "find-runtime", "TARGET == 'dummy'", %{}, true
+    assert {"spew-archive-1.0", %{"TARGET" => "dummy"}} = app.appliance
   end
 end
