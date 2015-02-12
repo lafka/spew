@@ -8,6 +8,7 @@ defmodule Spew.Instance do
     defstruct [
       ref: nil,                       # string()
       name: nil,                      # string()
+      appliance: nil,                 # the appliance ref
       runner: Spew.Runner.Systemd,    # module()
       supervision: false,             # false | supspec()
       network: [],                    # [{:bridge, :tm} | :veth]
@@ -15,7 +16,8 @@ defmodule Spew.Instance do
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
       state: {:waiting, {0, 0, 0}},   # {state(), now()}
-      runtime: %{}                    # runtime specific opts like logging, metrics
+      runtime: %{},                   # runtime specific opts like logging, metrics
+      tags: [],                       # [tag, ..]
     ]
   end
 end

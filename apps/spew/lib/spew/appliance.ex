@@ -8,9 +8,12 @@ defmodule Spew.Appliance do
   @doc """
   Add a new appliance definition
   """
-  def add(name, {_app_t, _app_spec} = app, instanceopts, enabled? \\ true), do:
-    GenServer.call(@name, {:add, name, app, instanceopts, enabled?})
+  def add(name, runtime, instanceopts, enabled? \\ true), do:
+    GenServer.call(@name, {:add, name, runtime, instanceopts, enabled?})
 
+  @doc """
+  Retrieve an appliance either by name or its reference
+  """
   def get(ref), do: GenServer.call(@name, {:get, ref})
 
   @doc """
@@ -25,8 +28,32 @@ defmodule Spew.Appliance do
 
   @doc """
   Reload configuration from disk
+
+  If `files` are not specified or `nil` then all already files will
+  be reloaded
   """
-  def reload, do: GenServer.call(@name, :reload)
+  def reload(files \\ nil), do: GenServer.call(@name, {:reload, files})
+
+  @doc """
+  Load a set of files
+
+  If any of the files contains definitions with the same name as an
+  existing appliance AND they are not equal, the loading of all files
+  will fail.
+
+  The files loaded will be registered and can be reloaded by calling
+  `Appliance.reload`
+  """
+  def loadfiles(files), do: GenServer.call(@name, {:loadfiles, files})
+
+  @doc """
+  Unload files
+
+  All appliances defined in the files will be deleted as well, no
+  checks are done to see if the configuration defined in those files
+  are actually used or if the file is loaded.
+  """
+  def unloadfiles(files), do: GenServer.call(@name, {:unloadfiles, files})
 
   if Mix.env in [:dev, :test] do
     def reset, do: GenServer.call(@name, :reset)
@@ -36,6 +63,7 @@ defmodule Spew.Appliance do
     defstruct [
       ref: nil,                             # the actual id of the appliance
       name: nil,                            # string()
+      runtime: "",                          # the query for the build
       appliance: {"spew-archive-1.0", nil}, # What type of appliance, second argument is the build spec
       instance: %Spew.Instance.Item{        # defaults is merged with instance cfg
         runner: Spew.Runner.Systemd,
@@ -61,7 +89,8 @@ defmodule Spew.Appliance do
 
     defmodule State do
       defstruct appliances: %{},
-                names: %{}
+                names: %{},
+                files: %{}
     end
 
     def start_link do
@@ -69,49 +98,37 @@ defmodule Spew.Appliance do
     end
 
     def init(_) do
-      {:reply, :ok, state} = handle_call :reload, {self, make_ref}, %State{}
+      files = appliancefiles
+      {:reply, :ok, state} = handle_call {:reload, files}, {self, make_ref}, %State{}
       {:ok, state}
     end
 
-    defp load_configs() do
-      searchpath = [
-        Path.join([Spew.root, "appliances", "*"])
-        | Application.get_env(:spew, :appliancepaths) || []
-      ]
-
-      Enum.reduce searchpath, %{}, fn(path, acc) ->
-        path = Path.join path, "*.exs"
-        Path.expand(path)
-          |> Path.wildcard
-          |> Enum.reduce acc, fn(file, acc) ->
-
-          {cfg, []} = Code.eval_file file
-          ref = Utils.hash cfg
-          val = Map.merge %Item{}, Map.put(cfg, :ref, ref)
-          Map.put_new acc, ref, val
-        end
-      end
+    def handle_call({:reload, nil}, from, state) do
+      files = Enum.flat_map state.files, fn({_, files}) -> files end
+      handle_call({:reload, files}, from, state)
     end
+    def handle_call({:reload, files}, _from, state) do
+      {files, appliances} = load_configs files
+      appliances = Map.merge appliances, state.appliances
 
-    def handle_call(:reload, _from, state) do
-      appliances = load_configs
-
-      names = Enum.reduce appliances, %{}, fn({ref, %{name: name}}, acc) ->
+      names = Enum.reduce appliances, state.names, fn({ref, %{name: name}}, acc) ->
         Map.put(acc, name, ref)
       end
 
       Logger.debug "found #{Map.size(appliances)} appliances"
       {:reply, :ok, %State{ appliances: appliances,
                             names: names}}
+    rescue e in Code.LoadError ->
+      {:reply, {:error, {:load, e.file}}, state}
     end
 
-    def handle_call({:add, name, {_t, _spec} = app, instance, enabled?}, _from, state) do
+    def handle_call({:add, name, runtime, instance, enabled?}, _from, state) do
       case Enum.drop_while state.appliances,
                            fn({_ref, appliance}) -> appliance.name !== name end do
         [] ->
           appliance = %Item{
             name: name,
-            appliance: app,
+            runtime: runtime,
             instance: Map.merge(%Item{}.instance, instance),
             enabled?: enabled?
           }
@@ -126,7 +143,7 @@ defmodule Spew.Appliance do
               names: Map.put(state.names, name, ref)}}
 
         [{ref, _} | _] ->
-          {:reply, {:error, {:conflict, {:appliance, ref}}}, state}
+          {:reply, {:error, {:conflict, {:appliance, :ref, ref}}}, state}
       end
     end
 
@@ -161,9 +178,92 @@ defmodule Spew.Appliance do
       end
     end
 
+    def handle_call({:loadfiles, files}, _from, state) do
+      {files, appliances} = load_configs files
+
+      case appliances |> Map.to_list |> insert_appliances(state) do
+        {:ok, newstate} ->
+          {:reply, :ok, %{newstate |
+                          files: Utils.Collection.deepmerge(files, state.files)}}
+
+        {:error, _} = err ->
+          {:reply, err, state}
+      end
+    rescue e in Code.LoadError ->
+      {:reply, {:error, {:load, e.file}}, state}
+    end
+
+    def handle_call({:unloadfiles, files}, _from, state) do
+      state = Enum.reduce files, state, fn(file, state) ->
+        file = Path.expand file
+        case state.files[file] do
+          nil ->
+            state
+
+          refs ->
+            Enum.reduce refs, state, fn(ref, %{appliances: appliances,
+                                               names: names,
+                                               files: files}) ->
+
+              %{state |
+                appliances: Map.delete(appliances, ref),
+                names: Map.delete(names, appliances[ref].name),
+                files: Map.delete(files, file)}
+            end
+        end
+      end
+
+      {:reply, :ok, state}
+    end
+
     if Mix.env in [:dev, :test] do
       def handle_call(:reset, _from, _) do
         {:reply, :ok, %State{}}
+      end
+    end
+
+    defp insert_appliances([], state), do: {:ok, state}
+    defp insert_appliances([{ref, appliance} | rest], state) do
+      case state.names[appliance.name] do
+        nil ->
+          newstate = %{state |
+              appliances: Map.put(state.appliances, ref, appliance),
+              names: Map.put(state.names, appliance.name, ref)}
+
+          insert_appliances rest, newstate
+
+        ^ref ->
+          insert_appliances rest, state
+
+        _ ->
+          {:error, {:conflict, {:appliance, :name, appliance.name}}}
+      end
+    end
+
+    def appliancefiles do
+      searchpath = [
+        Path.join([Spew.root, "appliances", "*"])
+        | Application.get_env(:spew, :appliancepaths) || []
+      ]
+
+      Enum.flat_map searchpath, fn(path) ->
+        Path.join(path, "*.exs")
+          |> Path.expand
+          |> Path.wildcard
+      end
+    end
+    defp load_configs(files) do
+
+      Enum.reduce files, {%{}, %{}}, fn(file, {files, apps}) ->
+        file = Path.expand file
+        {cfg, []} = Code.eval_file file
+        ref = Utils.hash cfg
+        val = Map.merge %Item{}, Map.put(cfg, :ref, ref)
+
+        files = Map.put files, file, [ref | files[file] || []]
+        apps = Map.put_new apps, ref, val
+
+        {files, apps}
       end
     end
   end

@@ -1,8 +1,8 @@
 %{
   name: "void",
+  runtime: "",
   instance: %{
     runner: Spew.Runner.Void,
   },
-  appliance: nil,
   enabled?: true
 }
