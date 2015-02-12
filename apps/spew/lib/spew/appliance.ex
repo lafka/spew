@@ -93,6 +93,12 @@ defmodule Spew.Appliance do
                 files: %{}
     end
 
+    defmodule ConfigError do
+      defexception param: nil,
+                   file: nil,
+                   message: "setting read-only parameter"
+    end
+
     def start_link do
       GenServer.start_link @name, %{}, name: @name
     end
@@ -118,8 +124,15 @@ defmodule Spew.Appliance do
       Logger.debug "found #{Map.size(appliances)} appliances"
       {:reply, :ok, %State{ appliances: appliances,
                             names: names}}
-    rescue e in Code.LoadError ->
+    rescue
+      e in Code.LoadError ->
       {:reply, {:error, {:load, e.file}}, state}
+
+      e in [TokenMissingError, SyntaxError] ->
+        {:reply, {:error, {:syntax, e.file}}, state}
+
+      e in ConfigError ->
+        {:reply, {:error, {:param, e.param, e.file}}, state}
     end
 
     def handle_call({:add, name, runtime, instance, enabled?}, _from, state) do
@@ -189,8 +202,15 @@ defmodule Spew.Appliance do
         {:error, _} = err ->
           {:reply, err, state}
       end
-    rescue e in Code.LoadError ->
-      {:reply, {:error, {:load, e.file}}, state}
+    rescue
+      e in Code.LoadError ->
+        {:reply, {:error, {:load, e.file}}, state}
+
+      e in [TokenMissingError, SyntaxError] ->
+        {:reply, {:error, {:syntax, e.file}}, state}
+
+      e in ConfigError ->
+        {:reply, {:error, {:param, e.param, e.file}}, state}
     end
 
     def handle_call({:unloadfiles, files}, _from, state) do
@@ -257,6 +277,10 @@ defmodule Spew.Appliance do
       Enum.reduce files, {%{}, %{}}, fn(file, {files, apps}) ->
         file = Path.expand file
         {cfg, []} = Code.eval_file file
+
+        cfg[:ref] && raise ConfigError, file: file, param: :ref
+        cfg[:appliance] && raise ConfigError, file: file, param: :appliance
+
         ref = Utils.hash cfg
         val = Map.merge %Item{}, Map.put(cfg, :ref, ref)
 

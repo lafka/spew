@@ -49,12 +49,12 @@ defmodule SpewApplianceTest do
   end
 
   test "config: load file" do
+    {:error, {:load, _}} = Appliance.loadfiles ["./i-dont-exist"]
+
     {:error, {:notfound, {:appliance, "void"}}} = Appliance.get "void"
     :ok = Appliance.loadfiles ["./test/appliances/void.exs"]
 
     {:ok, void} = Appliance.get "void"
-
-    # check non existing file
   end
 
   test "config: unload file" do
@@ -66,10 +66,12 @@ defmodule SpewApplianceTest do
 
     {:error, {:notfound, {:appliance, "void"}}} = Appliance.get "void"
 
-    # error on non-loaded file
   end
 
-  test "config: refute access to appliance opt" do
+  test "config: refute access to `appliance` and `ref`" do
+    assert {:error, {:syntax, _}} = Appliance.loadfiles ["./test/priv/broken-appliance-syntax.exs"]
+    assert {:error, {:param, :appliance, _}} = Appliance.loadfiles ["./test/priv/broken-appliance.exs"]
+    assert {:error, {:param, :ref, _}} = Appliance.loadfiles ["./test/priv/broken-appliance-ref.exs"]
   end
 
   test "find runtime" do
