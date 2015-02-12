@@ -154,7 +154,7 @@ defmodule Spew.Appliance do
 
           ref = Utils.hash appliance
           appliance = %{appliance | ref: ref,
-                                    appliance: find_runtime(runtime)}
+                                    appliance: find_runtime(runtime, true)}
 
           {:reply,
             {:ok, appliance},
@@ -293,8 +293,8 @@ defmodule Spew.Appliance do
 
         ref = Utils.hash cfg
         val = Map.merge %Item{}, cfg
-        val = %{val | ref: Map.put(cfg, :ref, ref),
-                      appliance: find_runtime(val.runtime)}
+        val = %{val | ref: ref,
+                      appliance: find_runtime(val.runtime, false)}
 
         files = Map.put files, file, [ref | files[file] || []]
         apps = Map.put_new apps, ref, val
@@ -303,14 +303,17 @@ defmodule Spew.Appliance do
       end
     end
 
-    defp find_runtime(""), do: {nil, nil}
-    defp find_runtime(nil), do: {nil, nil}
-    defp find_runtime(query) do
+    defp find_runtime("", _), do: {nil, nil}
+    defp find_runtime(nil, _), do: {nil, nil}
+    defp find_runtime(query, raise?) do
       q = ExQuery.Query.from_string query
       {:ok, builds} = Spew.Build.list
       case Enum.filter Map.values(builds), q do
-        [] ->
+        [] when raise? ->
           raise NoRuntime, query: query
+
+        [] ->
+          {nil, nil}
 
         [build | _] ->
           {build["TYPE"], build}
