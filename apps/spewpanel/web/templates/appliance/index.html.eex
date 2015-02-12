@@ -1,13 +1,41 @@
-<div class="col-xs-2" id="sidebar">
-  <h5>Filters</h4>
+<div id="sidebar">
+  <h5 class="title">Appliances</h4>
 
-  <a href="/appliance?create=true" class="btn btn-sm btn-primary">Create appliance</a>
+  <h5><b>Filters:</b></h5>
 </div>
 
-<div class="col-xs-10">
+<div class="col-xs-10 appliances">
+  <div class="breadcrumbs">
+    <span class="back"><a href="/">&laquo;- Dashboard</a></span>
+      &ndash;
+    <span class="">
+      <span>/ <a href="/appliance">Appliances</a></span>
+      <%= if @params["query"] do %>
+        <span><span class="block"><%= @params["query"] %></span></span>
+      <% end %>
+    </span>
+  </div>
+
   <%= for appliance <- @appliances do %>
-    <div class="appliance">
-      <h4><a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a></h4>
+    <div class="row">
+      <div class="container-fluid">
+        <div class="appliance">
+          <div class="col-xs-7">
+            <h4><a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a></h4>
+            <span class="type"><%= appliance.instance.runner %></span>;
+            using <code class="runtime"><%= appliance.runtime %></code>
+          </div>
+          <div class="col-xs-5">
+            <%= if appliance.enabled? do %>
+              <a href="#" class="btn btn-sm btn-warning">Disable</a>
+            <% else %>
+              <a href="#" class="btn btn-sm btn-success">Enable</a>
+            <% end %>
+            <a href="#" class="btn btn-sm btn-primary">Spawn instance</a>
+            <a href="#" class="btn btn-sm btn-danger">Delete</a>
+          </div>
+        </div>
+      </div>
     </div>
   <% end %>
 </div>

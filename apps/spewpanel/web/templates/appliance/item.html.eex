@@ -1,9 +1,16 @@
 
 <div class="col-xs-2" id="sidebar">
-  <h5>Filters</h5>
+  <h5 class="title">Appliance</h4>
 </div>
 
 <div class="col-xs-10">
+  <div class="breadcrumbs">
+    <span class="">
+      <span>/ <a href="/appliance">Appliances</a></span>
+      <span>/ <a href="/appliance/<%= @ref %>"><%= @appliance.name %></a></span>
+    </span>
+  </div>
+
   <div class="page-header">
     <h4><%= @appliance.name %></h4>
   </div>
@@ -16,7 +23,7 @@
     <dd><%= @appliance.ref %></dd>
 
     <dt>Build</dt>
-    <dd><%= inspect @appliance.appliance %></dd>
+    <dd><%= buildinfo @appliance.appliance %></dd>
 
     <dt>Runner Options</dt>
     <dd>
