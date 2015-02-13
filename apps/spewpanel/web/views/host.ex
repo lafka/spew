@@ -2,7 +2,7 @@ defmodule Spewpanel.HostView do
   use Spewpanel.Web, :view
 
   def hosts(q \\ []) do
-    IO.inspect Spew.Host.query q
+    Spew.Host.query q
   end
 
   def ip_to_string({mask,_}), do: ip_to_string(mask)
