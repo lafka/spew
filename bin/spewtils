@@ -1,0 +1,319 @@
+#!/bin/bash
+# This simple utility provides shell script helpers to read and write
+# parameters to a spew host
+
+
+sourced=no
+[ -z "$BASH_SOURCE" ] && sourced=yes
+
+# exit statuses:
+# 1 -> invalid command
+# 2 -> missing dependency to run
+# 3 -> missing or invalid input
+# 4 -> failed to configure network
+# 5 -> failed to contact $SPEWHOST
+
+deps="curl bash dhclient dhclient-script ifconfig sed awk tr grep"
+# required by dhclient-script
+deps="$deps ip rm chown chmod mv"
+
+
+if [ "no" = "$sourced" ]; then
+	for dep in $deps; do
+		command -v "$dep" > /dev/null || {
+			echo "error: command \`$dep\` not available" >&2;
+			exit 2;
+		}
+	done
+
+	[ -z "$SPEWHOST" ] && [ "$1" != "buildroot" ] && {
+		echo "error: \$SPEWHOST not available" >&2;
+		exit 3;
+	}
+
+	[ -z "$APPREF" ] && [ "$1" != "buildroot" ] && {
+		echo "error: \$APPREF not set not available" >&2;
+		exit 3;
+	}
+fi
+
+_init() {
+	_connect $1
+	shift
+
+	[ ! -z "$1" ] && exec /bin/bash || exec $@
+}
+
+_contain() {
+	BRIDGE=${BRIDGE:-tm}
+
+	[ -z "$1" ] && { echo "usage: $0 contain <command> [dep1, .., depN]"; exit 1; }
+
+	mkdir -p /tmp/spew/contained
+	target=$(mktemp -d /tmp/spew/contained/XXXX)
+	_buildroot "$target" $@
+	echo systemd-nspawn -D "$target" -M "$(basename "$target")" --network-bridge "$BRIDGE" --network-veth /bin/spewtils init
+	systemd-nspawn \
+		-D "$target" \
+		-M "$(basename "$target")" \
+		--network-bridge "$BRIDGE" \
+		--network-veth \
+		--setenv "SPEWHOST=$SPEWHOST" \
+		--setenv "APPREF=$(basename "$target")" \
+		/usr/bin/spewtils init
+	rm -rf "$target"
+}
+
+_connect() {
+	ifconfig ${IFACE:-host0} up
+	sed -i '/send host-name/d;' /etc/dhclient.conf
+	echo 'send host-name "$HOSTNAME";' >> !$
+	dhclient -v ${IFACE:-host0} || exit 4
+	json=$(args_to_json appref:$APPREF $(ifconfig ${IFACE:-host0} | awk '/inet/{print $1":"$2}') $@)
+	curl -so /dev/null "$SPEWHOST/appliance" -X POST -d "$json" || exit 5
+	# it's expected that spew already registered the instance
+	args_to_env $(ifconfig ${IFACE:-host0} | awk '/inet/{print $1":"$2}') $@
+}
+
+_publish() {
+	json=$(args_to_json $@)
+	curl -so /dev/null "$SPEWHOST/appliance/$APPREF" -X PUT -d "$json" || exit 5
+}
+
+_publish_after() {
+	cmd=$(tail_args $@)
+	eval $cmd
+	export exit_status=$?
+	_publish $(eval echo $@)
+}
+
+_await() {
+	args=
+	exports=
+	n=0
+	while [ $# -gt 1 ]; do
+		args="$args \"$1\""
+		exports="$exports $2"
+		n=$((n + 1))
+		shift 2
+	done
+	eval _await2 $n $(echo $args) $exports
+}
+
+# expects first argument to be integer with pivot point for args vs exports
+_await2() {
+	pivot=$1
+	start=$((pivot + 1))
+	len=$(($# - pivot))
+	shift
+
+	exports=${@:$start:$len}
+
+	i=1
+	while [ $pivot -gt 0 ]; do
+		arg=$(echo $1 | sed 's/ /%20/g')  # yay for urlencode :p
+		echo GET $SPEWHOST/await/$arg >&2
+		json=$(curl -sv "$SPEWHOST/await/$arg" | sed "s/^\[//;s/]\$//;s/},/\n/g" | grep data:)
+
+		if [ 0 = $? ]; then
+			echo "$json" | while read line; do
+				line=$(echo $line | sed 's/data: //')
+				json_to_env "$line" $(at $i $exports)
+			done
+		else
+			echo "error using \`GET /await\`: $json" >&2
+			return 5 2> /dev/null || exit 5
+		fi
+
+		pivot=$((pivot - 1))
+		i=$((i + u))
+		shift
+		continue
+		#echo "res: ${json}" >&2
+		#set +x
+
+		#if [ 0 = $? ]; then
+		#	echo "$json" | while read line; do
+		#		line=$(echo $line | sed 's/data: //')
+		#		json_to_env "$line" $(at $i $exports)
+		#	done
+		#else
+		#	echo "error using \`GET /await\`: $json" >&2
+		#	return 5 2> /dev/null || exit 5
+		#fi
+		#i=$(( i + 1 ))
+	done
+}
+
+at() {
+	echo $2 | awk "{print \$$1}"
+}
+
+_buildroot() {
+	target="$1"
+	shift
+
+	[ -z "$target" ] && return 1
+
+	mkdir -p $target/{dev,etc,var/log,usr/bin,var/lib/dhclient}
+	ln -sf ./usr/lib "$target/lib"
+	ln -sf ./usr/lib "$target/lib64"
+	ln -sf ./lib "$target/usr/lib64"
+	ln -sf ./usr/bin "$target/bin"
+	ln -sf ./usr/bin "$target/sbin"
+	ln -sf ./bin "$target/usr/sbin"
+
+	cp -v $(realpath "$0") "$target/usr/bin"
+
+	# start with the loader
+	ldd /bin/bash | tail -n 1 | awk '{print $1}'
+	files=$(ldd /bin/bash | tail -n 1 | awk '{print $1}')
+
+
+	files=$(for cmd in $@ $deps $files; do
+		# terrible quickfix, because of symlink of /{bin,lib,..} point
+		# to the hosts environment
+		cmd=$(command -v "$cmd")
+		cmd=$(echo "$cmd" | sed 's~^/bin~/usr/bin~;s~^/lib~/usr/lib~')
+		echo $cmd
+		ldd "$cmd" | awk '/=>/{print $3}'
+	done)
+
+	for f in  $files; do
+		# quickfix, /bin is symlinked to /usr/bin, expand the stuffs
+		mkdir -p $target/$(dirname "$f")
+		cp -v "$f" "$target/$f" || true
+	done
+
+
+	getent passwd root > "$target/etc/passwd"
+	getent group root > "$target/etc/group"
+	cp /etc/nsswitch.conf "$target/etc/nsswitch.conf"
+	cp /etc/resolv.conf "$target/etc/resolv.conf"
+	echo 'local-chroot' > "$target/etc/hostname"
+}
+
+args_to_json() {
+	echo -n '{'
+	for arg in $@; do
+		[ "--" = "$arg" ] && break
+
+		key=$(echo "$arg" | sed 's/:.*//')
+		case "$key" in
+			inet) key=ip4 ;;
+			inet6) key=ip6 ;;
+		esac
+
+		val=$(echo "$arg" | sed 's/[^:]*://')
+
+		if [ "tags" = "$key" ]; then
+			echo -n "\"$key\":[\"$(echo $val | sed "s/,/\",\"/g")\"],"
+		else
+			echo -n "\"$key\":\"$val\","
+		fi
+
+		shift
+	done | sed 's/,$//'
+	echo -n '}'
+}
+
+json_to_env() {
+	#{"tags":["appliance:riak2"],"state":"running","exit_status":null,"appref":"hey"}
+	echo $1 | sed -E 's/"([^"]*)":\[(.*?)\],?/\1=\2\n/g;
+	                  s/"([^"]*)":"([^"]*)",?/\1=\2\n/g;
+	                  s/"([^"]*)":([^,]*),?/\1=\2\n/g' | while read line; do
+
+		line=$(echo $line | sed -E 's/[}{]//g; s/(,|")/ /g')
+
+		[ -z "$line" ] && continue
+
+		k=$2_$(echo $line | awk -F'=' '{print $1}' | tr '[:lower:]' '[:upper:]')
+		v=$(echo $(echo $line | awk -F'=' '{print $2}'))
+		[ "$v" = "null" ] && v
+
+		echo "$k=\"$(echo $v)\""
+	done
+}
+
+args_to_env() {
+	for arg in $@; do
+		[ "--" = "$arg" ] && break
+
+		key=$(echo "$arg" | sed 's/:.*//' | tr '[:lower:]' '[:upper:]')
+		case "$key" in
+			INET) key=IP4 ;;
+			INET6) key=IP6 ;;
+		esac
+
+		val=$(echo "$arg" | sed 's/[^:]*://')
+
+		if [ "TAGS" = "$key" ]; then
+			echo "$key=$(echo $val | sed "s/,/ /g")"
+		else
+			echo "$key=$val"
+		fi
+	done
+}
+
+tail_args() {
+	for arg in $@; do
+		[ "--" != "$arg" ] && shift && continue
+		shift && break
+	done
+	echo $@
+}
+
+head_args() {
+	while [ $# -gt 0 ]; do
+		[ "--" = "$arg" ] && break
+		echo "$1"
+		shift
+	done
+}
+
+
+if [ "no" = "$sourced" ]; then
+	cmd="$1"
+	shift
+	case "$cmd" in
+		contain)
+			_contain $@
+			;;
+
+		init)
+			_init $@
+			;;
+
+		connect)
+			_connect $@
+			;;
+
+		publish)
+			_publish $@
+			;;
+
+		publish-after)
+			_publish_after $@
+			;;
+
+		await)
+			eval _await $(while [ $# -gt 0 ]; do echo "\"$1\""; shift; done)
+			;;
+
+		buildroot)
+			_buildroot $@
+			;;
+
+		*)
+			echo "usage: $(basename "$0") <command> [args]
+		init           call connect and run script specified by \$1
+		connect        connect to the spew host, init network and publish state
+		contain        run a executable in a spew environement built using \`buildroot\`
+		buildroot      build a chroot environement containing commands supplied
+		publish        publish some state to spew discovery engine
+		publish-after  publish after command finish execution
+		await          await discovery engine to fulfill query" >&2
+			exit 1
+			;;
+	esac
+fi
