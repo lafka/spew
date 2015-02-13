@@ -10,13 +10,14 @@ defmodule Spew.Instance do
       name: nil,                      # string()
       appliance: nil,                 # the appliance ref
       runner: Spew.Runner.Systemd,    # module()
+      command: "/bin/false",          # string()
       supervision: false,             # false | supspec()
       network: [],                    # [{:bridge, :tm} | :veth]
       rootfs: nil,                    # {type(), opts :: term()}
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
       state: {:waiting, {0, 0, 0}},   # {state(), now()}
-      runtime: %{},                   # runtime specific opts like logging, metrics
+      runtime: %{},                   # runtime specific state like logging, metrics
       tags: [],                       # [tag, ..]
     ]
   end
