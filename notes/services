@@ -1,0 +1,25 @@
+# Services
+
+Service describes what instance(s) must be running to deliver
+something.
+
+For instance `database` might be a service that contains:
+	- service:riak
+	- service:redis
+	- service:influxdb
+
+where `service:riak`:
+	- instance:* -> appliance.name == 'riak'
+
+`metrics` might be a different service that includes
+	- service:influxdb
+	- service:grafana
+
+
+
+There is no way to control the options of an appliance or a instance
+through a service. Instead it just describes what must be running.
+
+In the future if we add some kind of metric integration we can then
+look at the performance of the service and export that to someplace
+(i.e. a status page)
