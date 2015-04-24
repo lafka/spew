@@ -1,0 +1,4 @@
+%{"conform": {:hex, :conform, "0.13.0"},
+  "erlexec": {:git, "git://github.com/saleyn/erlexec.git", "1790d0729d20493b7c4e89a3f1b4e9e17d177820", []},
+  "exec": {:git, "git://github.com/saleyn/erlexec.git", "1790d0729d20493b7c4e89a3f1b4e9e17d177820", []},
+  "exrm": {:hex, :exrm, "0.15.3"}}
