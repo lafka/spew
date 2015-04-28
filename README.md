@@ -1,4 +1,4 @@
-RTFA
+Spew
 =======
 
 **THIS IS AT BEST PRE-ALPHA, YOU WILL REGRET USING IT - do stay tuned for updates though :)**
@@ -7,7 +7,7 @@ Docker is nice, there's alot of tooling around but nothing seems to
 work nicely together unless you build it into your docker image. Even
 managing containers without running a full blown PaaS seems daunting.
 
-The aim of RTFA is to dock applications, meaning:
+The aim of Spew is to dock applications, meaning:
  - run applications (most likely a container) - called appliance
  - manage container upgrades
  - provide a mechanism to easily hook into create,crash,remove actions
@@ -22,7 +22,7 @@ There's the appliance API which runners must comply to:
 
 ```
 # Create an appliance 
-RTFA.Appliance.create <appliance> :: Appliance,
+Spew.Appliance.create <appliance> :: Appliance,
 	<app-opts> :: %{
 		name: String,
 		appliance: appliancePreCond :: term
@@ -36,10 +36,10 @@ RTFA.Appliance.create <appliance> :: Appliance,
 	} -> ApplianceRef
 
 # Remove a appliance
-RTFA.Appliance.remove ApplianceRef || name
+Spew.Appliance.remove ApplianceRef || name
 
 # Run a appliance, if app-opts.name is given it must be unique
-RTFA.Appliance.run <appliance>, <app-opts> # {@see create}
+Spew.Appliance.run <appliance>, <app-opts> # {@see create}
 ```
 
 ## Configuration
@@ -59,7 +59,7 @@ additional parameters (for instance `vsn:~>2.0`). These options are
 free-form and up to the indivudual appliance handler to process and
 use.
 
-The ItemOpts is according to `RTFA.Appliance.Config.Item`.
+The ItemOpts is according to `Spew.Appliance.Config.Item`.
 
 When this is processed two additional keys will be added to ItemOpts:
  - `ref` - the reference of that particular config
@@ -78,16 +78,16 @@ The state of the process manager is simple:
    connected to. This is to allow clearing up stuff once they die/exit
  - The appliance list. This keeps the `ref -> app-state` map.
    App-state is here things given by the appliance runner (ie.
-	`RTFA.Appliances.Shell` or `RTFA.Appliances.Docker`).
+	`Spew.Appliances.Shell` or `Spew.Appliances.Docker`).
 
 ## @todo - Clustering
 
-A cluster of RTFA instance can be established. They will then share the
+A cluster of Spew instance can be established. They will then share the
 registry of running hosts allowing a low-level of orchestration.
 The clustering will rely on Erlangs clustering capabilities and the
-`RTFA.Appliance` API will act on the cluster as a whole (ie. a host
+`Spew.Appliance` API will act on the cluster as a whole (ie. a host
 can spawn appliances on other hosts, events will be distributed and
-the state of all the RTFA instances will be will available on all
+the state of all the Spew instances will be will available on all
 nodes through gproc.
 
 
@@ -101,11 +101,11 @@ nodes through gproc.
  - add support for dependencies
  - patch appref's in await when a upgrade is done
  - Add CLI
-  - `rtfacli start <ref-or-name || --all>`
-  - `rtfacli stop [-k|--kill] <ref-or-name, .. || --all>`
-  - `rtfacli status [ref-or-name, ..]`
-  - `rtfacli attach <ref-or-name>`
-  - `rtfacli logs [-f] [-t n] <ref-or-name>`
+  - `spew-cli start <ref-or-name || --all>`
+  - `spew-cli stop [-k|--kill] <ref-or-name, .. || --all>`
+  - `spew-cli status [ref-or-name, ..]`
+  - `spew-cli attach <ref-or-name>`
+  - `spew-cli logs [-f] [-t n] <ref-or-name>`
  - Add release generation!!!
  - Add systemd service file
  - Add upstart service file

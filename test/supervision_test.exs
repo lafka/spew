@@ -1,9 +1,9 @@
 defmodule SupervisionTest do
   use ExUnit.Case
 
-  alias RTFA.Appliance
-  alias RTFA.Appliance.Manager
-  alias RTFA.Appliance.Config
+  alias Spew.Appliance
+  alias Spew.Appliance.Manager
+  alias Spew.Appliance.Config
 
   setup do
     :ok = Config.unload :all
@@ -11,7 +11,7 @@ defmodule SupervisionTest do
   end
 
   test "restart on non-zero" do
-    {:ok, appref} = RTFA.Appliance.run "read-nonzero", %{restart: [:crash]}
+    {:ok, appref} = Spew.Appliance.run "read-nonzero", %{restart: [:crash]}
     {:ok, {appref, appcfg}} = Manager.get appref
 
     monref = Process.monitor appcfg[:runstate][:pid]

@@ -1,7 +1,7 @@
-defmodule RTFA.Appliance do
+defmodule Spew.Appliance do
 
-  alias RTFA.Appliance.Config
-  alias RTFA.Appliance.Manager
+  alias Spew.Appliance.Config
+  alias Spew.Appliance.Manager
 
   @doc """
   Creates a appliance
@@ -18,7 +18,7 @@ defmodule RTFA.Appliance do
     end
   end
   def create(_appref_or_name, _, _opts), do:
-    {:error, {:argument_error, "appopts must be of type RTFA.Appliance.Config.Item"}}
+    {:error, {:argument_error, "appopts must be of type Spew.Appliance.Config.Item"}}
 
 
   @doc """

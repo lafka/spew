@@ -1,11 +1,11 @@
 defmodule ConfigTest do
   use ExUnit.Case
 
-  alias RTFA.Appliance.Config
-  alias RTFA.Appliance.Config.Item
+  alias Spew.Appliance.Config
+  alias Spew.Appliance.Config.Item
 
   setup do
-    Application.put_env :rtfa, :appliance, config: "test/config/appliances.config"
+    Application.put_env :spew, :appliance, config: "test/config/appliances.config"
     :ok = Config.unload :all
   end
 
@@ -13,7 +13,7 @@ defmodule ConfigTest do
     # don't crash everything on broken config
 
     assert :ok = Config.load "test/config/broken.config"
-    assert :ok = Config.load Application.get_env(:rtfa, :appliance)[:config]
+    assert :ok = Config.load Application.get_env(:spew, :appliance)[:config]
     {:ok, vals1} = Config.fetch
 
     assert :ok = Config.load "test/config/config-test-appliances.config"
@@ -23,12 +23,12 @@ defmodule ConfigTest do
   end
 
   test "unload configuration" do
-    assert :ok = Config.load Application.get_env(:rtfa, :appliance)[:config]
+    assert :ok = Config.load Application.get_env(:spew, :appliance)[:config]
     assert {:ok, [_file]} = Config.files
     :ok = Config.unload :all
     assert {:ok, []} = Config.files
 
-    assert :ok = Config.load Application.get_env(:rtfa, :appliance)[:config]
+    assert :ok = Config.load Application.get_env(:spew, :appliance)[:config]
     assert :ok = Config.load "test/config/config-test-appliances.config"
     {:ok, [file, file2]} = Config.files
     :ok = Config.unload file

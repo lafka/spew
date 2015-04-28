@@ -1,12 +1,12 @@
-defmodule RTFA.Appliances.Void do
+defmodule Spew.Appliances.Void do
 
-  alias RTFA.Appliance.Manager
+  alias Spew.Appliance.Manager
 
   @moduledoc """
   A appliance runner that does nothing
 
   This is usefull for simulation as well as utilizing existing hooks
-  for components not controlled directly by RTFA
+  for components not controlled directly by Spew
   """
 
   def run(appopts, _opts) do

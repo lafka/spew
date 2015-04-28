@@ -1,15 +1,15 @@
-defmodule RTFA.Appliance.Config do
+defmodule Spew.Appliance.Config do
   @moduledoc """
   Appliance Configuration management
 
   The module exposes a interface to read configuration options.
-  The state is contained within `RTFA.Appliance.Config.Server` which
+  The state is contained within `Spew.Appliance.Config.Server` which
   allows reading the configuration or adding new temporary appliances
   not defined in the `appliances.config`
   """
 
 
-  alias RTFA.Appliance.Config.Item
+  alias Spew.Appliance.Config.Item
 
   defmodule Item do
     @derive [Access]
@@ -84,7 +84,7 @@ defmodule RTFA.Appliance.Config do
               appliances: %{}
 
     alias __MODULE__, as: Self
-    alias RTFA.Appliance.Config.Item
+    alias Spew.Appliance.Config.Item
 
     def start_link do
       GenServer.start_link __MODULE__, [], name: @name

@@ -1,9 +1,9 @@
-defmodule RTFATest do
+defmodule SpewTest do
   use ExUnit.Case
 
-  alias RTFA.Appliance
-  alias RTFA.Appliance.Config
-  alias RTFA.Appliance.Manager
+  alias Spew.Appliance
+  alias Spew.Appliance.Config
+  alias Spew.Appliance.Manager
 
   setup do
     Config.unload :all

@@ -1,7 +1,7 @@
-defmodule RTFA do
+defmodule Spew do
   use Application
 
   def start(_type, _args) do
-    RTFA.Supervisor.start_link
+    Spew.Supervisor.start_link
   end
 end

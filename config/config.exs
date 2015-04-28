@@ -1,6 +1,6 @@
 use Mix.Config
 
-config :rtfa, :appliance,
+config :spew, :appliance,
   config: "priv/appliances.config"
 
 config :logger, :console,

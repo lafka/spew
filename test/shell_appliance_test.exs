@@ -1,9 +1,9 @@
 defmodule ShellApplianceTest do
   use ExUnit.Case
 
-  alias RTFA.Appliance
-  alias RTFA.Appliance.Manager
-  alias RTFA.Appliance.Config
+  alias Spew.Appliance
+  alias Spew.Appliance.Manager
+  alias Spew.Appliance.Config
 
   setup do
     Config.unload :all

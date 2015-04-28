@@ -1,4 +1,4 @@
-defmodule RTFA.Appliances.Shell do
+defmodule Spew.Appliances.Shell do
 
   use Bitwise
 

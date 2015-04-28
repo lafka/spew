@@ -1,15 +1,15 @@
-defmodule RTFACLI do
+defmodule SpewCLI do
 
-  alias RTFACLI.Start
+  alias SpewCLI.Start
 
   def main(["help", cmd | _]) do
     IO.puts callmod cmd, :help, []
   end
   def main(["help"]) do
     IO.puts """
-    # rtfa-cli
+    # spew-cli
 
-    usage: rtfa-cli cmd [options] [args]
+    usage: spew-cli cmd [options] [args]
 
     args:
       #{Start.shorthelp}
@@ -31,7 +31,7 @@ defmodule RTFACLI do
   end
 
 
-  defp usage, do: "usage: rtfa-cli cmd [options] [args]"
+  defp usage, do: "usage: spew-cli cmd [options] [args]"
 
   defp callmod(cmd, fun, args) do
     mod = :"#{__MODULE__}.#{String.capitalize(cmd)}"
@@ -46,12 +46,12 @@ defmodule RTFACLI do
 
   defmodule Start do
     def run(args) do
-      RTFACLI.maybe_start_network
+      SpewCLI.maybe_start_network
     end
 
     def help(args) do
       """
-      usage: rtfa-cli start [--all] | <ref-or-name1, .., ref-or-nameN>
+      usage: spew-cli start [--all] | <ref-or-name1, .., ref-or-nameN>
 
       Starts one or more appliances, if --all is given everything is
       started otherwise those specified as arguments.

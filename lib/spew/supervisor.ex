@@ -1,4 +1,4 @@
-defmodule RTFA.Supervisor do
+defmodule Spew.Supervisor do
   use Supervisor
 
   def start_link do
@@ -7,8 +7,8 @@ defmodule RTFA.Supervisor do
 
   def init([]) do
     children = [
-      worker(RTFA.Appliance.Manager, []),
-      worker(RTFA.Appliance.Config.Server, [])
+      worker(Spew.Appliance.Manager, []),
+      worker(Spew.Appliance.Config.Server, [])
     ]
 
     supervise(children, strategy: :one_for_one)

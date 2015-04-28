@@ -1,4 +1,4 @@
-defmodule RTFA.Appliance.Manager do
+defmodule Spew.Appliance.Manager do
   use GenServer
 
   require Logger

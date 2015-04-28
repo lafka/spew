@@ -1,9 +1,9 @@
-defmodule RTFA.Mixfile do
+defmodule Spew.Mixfile do
   use Mix.Project
 
   def project do
     [
-      app: :'rtfa-cli',
+      app: :'spew-cli',
       version: "0.0.1",
       elixir: "~> 1.0",
       escript: escript,
@@ -12,8 +12,8 @@ defmodule RTFA.Mixfile do
 
   def escript do
     [
-      main_module: RTFACLI,
-      path: "bin/rtfa-cli",
+      main_module: SpewCLI,
+      path: "bin/spew-cli",
       embed_elixir: true
     ]
   end

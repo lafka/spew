@@ -1,7 +1,7 @@
 defmodule ManagerTest do
   use ExUnit.Case
 
-  alias RTFA.Appliance.Manager
+  alias Spew.Appliance.Manager
 
   test "server commands" do
     {:ok, appref} = Manager.run [[], []], [a: 1]
