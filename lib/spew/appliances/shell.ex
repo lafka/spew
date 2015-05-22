@@ -27,7 +27,7 @@ defmodule Spew.Appliances.Shell do
       #  :false -> opts
       #end
 
-      opts = [:stdin, {:stdout, self}, :monitor]
+      opts = [:stdin, {:stdout, self}, :monitor, {:stderr, self}]
 
       {:ok, pid, extpid} = :exec.run cmd, opts
 

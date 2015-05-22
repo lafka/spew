@@ -15,6 +15,17 @@ The aim of Spew is to dock applications, meaning:
 The scope is not limited to docker, it can be a LXC container, shell command
 or something radically different.
 
+# SYSTEMD-NSPAWN, SUDO, REQUIRETTY
+
+To run systemd containers spew requires root access. To make this work
+`!requiretty` is required in `/etc/sudoers`:
+
+
+```
+Cmnd_Alias NSPAWN = /usr/bin/systemd-nspawn
+user ALL = (root) NOPASSWD: NSPAWN
+Defaults!NSPAWN !requiretty
+```
 
 ## API
 
