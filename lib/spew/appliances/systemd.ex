@@ -45,10 +45,13 @@ defmodule Spew.Appliances.Systemd do
 
   defp build_cmd(vals), do: build_cmd(vals, [])
   defp build_cmd([], acc), do: {:ok, ["sudo systemd-nspawn" | acc]}
+
   defp build_cmd([{:name, v} | rest], acc), do:
-    build_cmd(rest, ["--machine #{v}" | acc])
+    build_cmd(rest, ["--machine", v | acc])
+
   defp build_cmd([{:command, v} | rest], acc), do:
     build_cmd(rest, acc ++ [v])
+
   defp build_cmd([{:root, {:busybox, dir}} | rest], acc) do
     case System.find_executable "busybox" do
       nil ->
@@ -63,7 +66,34 @@ defmodule Spew.Appliances.Systemd do
         build_cmd(rest, ["-D #{Path.absname(dir)}" | acc])
     end
   end
+
+  defp build_cmd([{:network, net} | rest], acc) do
+    case build_net_cmd(net, rest, acc) do
+      {:ok, [rest, acc]} ->
+        build_cmd rest, acc
+
+      {:error, _} = res ->
+        res
+    end
+  end
+
   defp build_cmd([{k, _v} | _rest], _acc), do: {:error, "unsupported key: `#{k}`"}
+
+
+  defp build_net_cmd([], rest, acc), do: {:ok, [rest, acc]}
+  defp build_net_cmd([{:bridge, iface} | r], rest, acc) do
+    {:ok, ifaces} = :inet.getiflist
+    # totaly non-portable way of checking if it's a bridge
+    if Enum.member? ifaces, '#{iface}' do
+      if File.exists? "/sys/class/net/#{iface}/bridge" do
+        build_net_cmd(r, rest, ["--network-bridge", iface | acc])
+      else
+        {:error, {:iface_not_bridge, "not a bridge: #{iface}, refusing to start container"}}
+      end
+    else
+      {:error, {:no_such_iface, "no such iface: #{iface}, refusing to start container"}}
+    end
+  end
 
   def stop(appcfg, opts \\ []) do
   end
