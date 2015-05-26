@@ -55,7 +55,7 @@ defmodule Spew.Appliance.Manager do
   end
 
   def handle_call({:run, [appcfg, runopts], runstate, monitor},
-                  _from,
+                  {from, _ref},
                   state = %Self{apprefs: apprefs,
                                 appliances: apps,
                                 supervision: sups
@@ -73,6 +73,7 @@ defmodule Spew.Appliance.Manager do
         restartcount: 0,
         created: now
       },
+      apploop: from,
       state: {now, :alive}
     }
 
@@ -93,7 +94,7 @@ defmodule Spew.Appliance.Manager do
     # we can't rely on the caller giving a pid to monitor in it's
     # opts. Therefore we store possible monitors in a searchable record
     if is_pid(monitor) do
-      {:reply, :ok, state} = handle_call {:add_monitor, appref, monitor}, _from, state
+      {:reply, :ok, state} = handle_call {:add_monitor, appref, monitor}, from, state
       {:reply, {:ok, appref}, %{state | :appliances => apps,
                                         :supervision => sups}}
     else

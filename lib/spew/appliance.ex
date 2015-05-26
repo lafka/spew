@@ -39,17 +39,121 @@ defmodule Spew.Appliance do
         module = atom_to_module appopts.type
 
         appopts = %{appopts | :handler => module}
-        case module.run appopts, opts do
-          {:ok, state} ->
-            Manager.run [appopts, opts], state
+        {ref, parent} = {make_ref, self}
 
-          {:ok, state, monitor} ->
-            Manager.run [appopts, opts], state, monitor
+        pid = spawn fn ->
+          case module.run appopts, opts do
+            {:ok, state} ->
+              {:ok, appref} = res = Manager.run([appopts, opts], state)
+              send parent, {ref, res}
+              {:ok, {_, appstate}} = Manager.get appref
+              apploop appstate
 
-          {:error, _err} = error ->
-            error
+            {:ok, state, monitor} ->
+              {:ok, appref} = res = Manager.run([appopts, opts], state, monitor)
+              send parent, {ref, res}
+              {:ok, {_, appstate}} = Manager.get appref
+              Process.monitor monitor
+              apploop appstate
+
+            {:error, _err} = error ->
+              send parent, {ref, error}
+          end
+        end
+
+        receive do
+          {^ref, res} -> res
+        after
+          5000 ->
+            Process.exit pid, :kill
+            {:error, :timeout}
         end
     end
+  end
+
+  @doc """
+  Message the app
+  """
+  def subscribe(appref, action) do
+    {:ok, {appref, appcfg}} = Manager.get appref
+    send appcfg[:apploop], {:subscribe, appref, {action, self}}
+    :ok
+  end
+
+  @doc """
+  Unsubscribe from appliance event
+  """
+  def unsubscribe(appref, action) do
+    {:ok, {appref, appcfg}} = Manager.get appref
+    send appcfg[:apploop], {:unsubscribe, appref, {action, self}}
+    :ok
+  end
+
+  defp apploop(appstate), do: apploop(appstate, %{})
+  defp apploop(appstate, subscribers) do
+    appref = appstate[:appref]
+    apppid = appstate[:runstate][:pid]
+
+    receive do
+      {:subscribe, ^appref, {action, from}} ->
+        Process.monitor from
+        subscribers = Dict.put(subscribers,
+                               action,
+                               [from | subscribers[action] || []])
+        apploop appstate, subscribers
+
+      {:unsubscribe, ^appref, {:_, from}} ->
+        subscribers = Enum.map subscribers, fn({_action, v}) ->
+          v -- from
+        end
+        apploop appstate, subscribers
+
+      {:unsubscribe, ^appref, {action, from}} ->
+        subscribers = Dict.put(subscribers,
+                               action,
+                               (subscribers[action] || []) -- from)
+        apploop appstate, subscribers
+
+      {:DOWN, _ref, :process, ^apppid, _} = ev ->
+        pids = Enum.reduce subscribers,
+                           [],
+                           fn({_, pids}, acc) -> Enum.uniq(pids ++ acc) end
+        Enum.each pids, &(send &1, ev)
+        :ok
+
+      {:DOWN, _ref, :process, pid, _} ->
+        subscribers = Enum.map subscribers, fn({action, pids}) ->
+          if Enum.member? pids, pid do
+            {action, Enum.filter(pids, &(pid !== &1))}
+          else
+            {action, pids}
+          end
+        end
+        apploop appstate, subscribers
+
+      #{action, ^appref, term} ->
+
+      {device, _pid, buf} when device in [:stderr, :stdout] ->
+        loopaction appref, :log, buf, subscribers
+        apploop appstate, subscribers
+    end
+  end
+
+  defp loopaction(appref, action, term, subscribers) do
+    push = cond do
+      action == :_ ->
+        Enum.reduce subscribers, [], fn({_k, v}, acc) ->
+          Enum.merge acc, v
+        end
+
+      nil !== subscribers[action] ->
+        subscribers[action]
+
+      true ->
+        []
+    end
+    for pid <- push || [], do:
+      send(pid, {action, appref, term})
   end
 
   # merge a into b
@@ -57,7 +161,7 @@ defmodule Spew.Appliance do
     Map.merge norm(a), norm(b), fn
       (_k, a1, b1) when is_map(a) and is_map(b) ->
         deepmerge(b1, a1)
-        
+
       # default to overwrite value if not map/list
       (_k, _a1, b1) ->
         b1

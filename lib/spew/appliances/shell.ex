@@ -29,7 +29,7 @@ defmodule Spew.Appliances.Shell do
 
       opts = [:stdin, {:stdout, self}, :monitor, {:stderr, self}]
 
-      {:ok, pid, extpid} = :exec.run cmd, opts
+      {:ok, pid, extpid} = :exec.run_link cmd, opts
 
       {:ok, [
         handler: __MODULE__,

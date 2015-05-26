@@ -1,6 +1,12 @@
 defmodule SpewCLI do
 
-  alias SpewCLI.Start
+  alias SpewCLI.Cmd
+
+  @cmds [
+    Cmd.Start,
+    Cmd.Log,
+    Cmd.Attach
+  ]
 
   def main(["help", cmd | _]) do
     IO.puts callmod cmd, :help, []
@@ -12,7 +18,7 @@ defmodule SpewCLI do
     usage: spew-cli cmd [options] [args]
 
     args:
-      #{Start.shorthelp}
+      #{Cmd.Start.shorthelp}
     """
   end
   def main([cmd | args]) do
@@ -22,47 +28,36 @@ defmodule SpewCLI do
 
 
   def maybe_start_network() do
-    {:ok, _} = :net_kernel.start [:"#{gen_ref}"]
+    name = :"spew-#{gen_ref}"
+
+    :os.cmd('epmd -daemon')
+    {:ok, _} = :net_kernel.start [name]
   end
 
   defp gen_ref do
     :crypto.hash(:sha256, :erlang.term_to_binary(make_ref))
-      |> Base.encode16 |> String.slice(0, 16)
+      |> Base.encode16
+      |> String.slice(0, 7)
+      |> String.downcase
   end
 
 
   defp usage, do: "usage: spew-cli cmd [options] [args]"
 
   defp callmod(cmd, fun, args) do
-    mod = :"#{__MODULE__}.#{String.capitalize(cmd)}"
+    mod = :"#{__MODULE__}.Cmd.#{String.capitalize(cmd)}"
     Code.ensure_loaded mod
 
     if function_exported? mod, fun, 1 do
       apply mod, fun, [args]
     else
       IO.puts :stderr, "invalid command: #{cmd}"
+      IO.puts :stderr, "Available commands:"
+      for cmd <- @cmds do
+        call = String.split("#{cmd}", ".") |> List.last |> String.downcase
+        IO.puts "\t#{cmd.shorthelp}"
+      end
     end
-  end
-
-  defmodule Start do
-    def run(args) do
-      SpewCLI.maybe_start_network
-    end
-
-    def help(args) do
-      """
-      usage: spew-cli start [--all] | <ref-or-name1, .., ref-or-nameN>
-
-      Starts one or more appliances, if --all is given everything is
-      started otherwise those specified as arguments.
-
-      Name can be the distinct name of the appliance or the reference
-      to an already existing appliance.
-      """
-    end
-
-    def shorthelp, do:
-      "start <ref-or-name, .. | --all> - start appliances"
   end
 
 end
