@@ -60,17 +60,51 @@ defmodule SystemdTest do
     assert {:ok, {_, :stopped}} = Appliance.status appref
   end
 
-  test "dir chroot" do
-    assert nil, "dir chroot test not implemented"
+#  test "dir chroot" do
+#    assert nil, "dir chroot test not implemented"
+#  end
+#
+  test "archive chroot", ctx do
+    {:ok, cfgref} = Appliance.create testname(ctx), %Config.Item{
+      name: testname(ctx),
+      type: :systemd,
+      runneropts: [
+        command: ["/dummy"],
+      ]
+    }
+
+    {:error, :checksum} = Appliance.run testname(ctx), %{
+      runneropts: [root: {:archive, "test/spew-builds/dummy-checksum-fail/1760bbafbd386052ce1810891ea5a22bf0d4ed8.tar.gz"}]
+    }
+
+    {:error, :signature} = Appliance.run testname(ctx), %{
+      runneropts: [root: {:archive, "test/spew-builds/dummy-gpg-fail/1760bbafbd386052ce1810891ea5a22bf0d4ed8e.tar.gz"}]
+    }
+
+    {:ok, appref} = Appliance.run testname(ctx), %{
+      runneropts: [
+        command: ["/bin/busybox sh -c 'echo systemd-container; sleep 1'"],
+        root: {:archive, "/home/user/.spew/builds/dummy/0.0.3/735eea0793cf82dfe22e8e1ee2f9460a07ff379b/adc83b19e793491b1c6ea0fd8b46cd9f32e592fc/a7b979c840c366668920d7b9ba1056102c1f700b.tar.gz"}
+      ]
+    }
+
+    assert_receive {:stdout, _, "systemd-container\n"}, 1000
+
+    # There will be some weird stderr messages, completely version
+    # dependant... flush them
+    flush
+    assert {:ok, {_, :alive}} = Appliance.status appref
+
+    :timer.sleep 1000
+    assert_receive {:DOWN, _ref, :process, _pid, :normal}, 1000
+    flush
+
+    assert {:ok, {_, :stopped}} = Appliance.status appref
   end
 
-  test "archive chroot" do
-    assert nil, "archive chroot test not implemented"
-  end
-
-  test "image chroot" do
-    assert nil, "image chroot test not implemented"
-  end
+#  test "image chroot" do
+#    assert nil, "image chroot test not implemented"
+#  end
 
   test "bridge network", ctx do
     # test for non existing bridge
@@ -124,17 +158,17 @@ defmodule SystemdTest do
     end
   end
 
-  test "host iface network" do
-    assert nil, "host iface net test not implemented"
-  end
-
-  test "vlan network" do
-    assert nil, "vlan net test not implemented"
-  end
-
-  test "macvlan network" do
-    assert nil, "macvlan net test not implemented"
-  end
+#  test "host iface network" do
+#    assert nil, "host iface net test not implemented"
+#  end
+#
+#  test "vlan network" do
+#    assert nil, "vlan net test not implemented"
+#  end
+#
+#  test "macvlan network" do
+#    assert nil, "macvlan net test not implemented"
+#  end
 
   test "expose ports" do
     assert nil, "expose ports test not implemented"

@@ -8,7 +8,7 @@ defmodule Spew.Appliance do
   """
   def create(name, appopts), do:
     create(name, appopts, [])
-  def create(name, appopts = %Config.Item{}, opts) do
+  def create(name, appopts = %Config.Item{}, _opts) do
     case Config.fetch name do
       {:ok, {cfgref, _}} ->
         {:error, {:appliance_exists, cfgref}}
@@ -33,8 +33,9 @@ defmodule Spew.Appliance do
       {:error, {:not_found, _}} = e ->
         e
 
-      {:ok, {cfgref, cfgappopts}} ->
-        appopts = Map.merge cfgappopts, appopts
+      {:ok, {_cfgref, cfgappopts}} ->
+        #appopts = Map.merge cfgappopts, appopts
+        appopts = deepmerge appopts, cfgappopts
         module = atom_to_module appopts.type
 
         appopts = %{appopts | :handler => module}
@@ -50,6 +51,34 @@ defmodule Spew.Appliance do
         end
     end
   end
+
+  # merge a into b
+  defp deepmerge(%{} = b, %{} = a) do
+    Map.merge norm(a), norm(b), fn
+      (_k, a1, b1) when is_map(a) and is_map(b) ->
+        deepmerge(b1, a1)
+        
+      # default to overwrite value if not map/list
+      (_k, _a1, b1) ->
+        b1
+    end
+  end
+  defp deepmerge(b, []), do: b
+  defp deepmerge(b, [{_,_} | _] = a) when is_list(a) do
+    Dict.merge a, b, fn
+      (_k, a1, b1) when is_list(a) and is_list(b) ->
+        deepmerge(a1, b1)
+        
+      # default to overwrite value if not map/list
+      (_k, _a1, b1) ->
+        b1
+    end
+  end
+  defp deepmerge(_a, b), do: b
+
+  defp norm(%{} = x), do: Map.merge(%{}, x)
+  defp norm([]), do: %{}
+  defp norm([{_,_}|_] = x), do: Enum.into(x, %{})
 
   @doc """
   Stops a running appliance
@@ -100,7 +129,7 @@ defmodule Spew.Appliance do
   end
   def status(appref) do
     case Manager.get appref do
-      {:ok, {appref, appcfg}} ->
+      {:ok, {_appref, appcfg}} ->
         {:ok, appcfg[:handler].status appcfg}
     end
   end

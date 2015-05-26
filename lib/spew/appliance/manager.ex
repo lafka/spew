@@ -291,8 +291,8 @@ defmodule Spew.Appliance.Manager do
   end
 
 
-  defp gen_ref do
-    :crypto.hash(:sha256, :erlang.term_to_binary(make_ref))
+  defp gen_ref(term \\ make_ref) do
+    :crypto.hash(:sha256, :erlang.term_to_binary(term))
       |> Base.encode64
   end
 end
