@@ -89,6 +89,21 @@ defmodule Spew.Appliance do
     :ok
   end
 
+  @doc """
+  Notify appliance of something
+  """
+  def notify(appref, action) do
+    {:ok, {appref, appcfg}} = Manager.get appref
+    send appcfg[:apploop], {action, appref}
+    :ok
+  end
+
+  def notify(appref, action, ev) do
+    {:ok, {appref, appcfg}} = Manager.get appref
+    send appcfg[:apploop], {action, appref, ev}
+    :ok
+  end
+
   defp apploop(appstate), do: apploop(appstate, %{})
   defp apploop(appstate, subscribers) do
     appref = appstate[:appref]
@@ -132,6 +147,10 @@ defmodule Spew.Appliance do
         apploop appstate, subscribers
 
       #{action, ^appref, term} ->
+
+      {:input, ^appref, buf} ->
+        :ok = :exec.send appstate[:runstate][:extpid], buf
+        apploop appstate, subscribers
 
       {device, _pid, buf} when device in [:stderr, :stdout] ->
         loopaction appref, :log, buf, subscribers
