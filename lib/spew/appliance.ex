@@ -188,10 +188,6 @@ defmodule Spew.Appliance do
       {device, _pid, buf} when device in [:stderr, :stdout] ->
         loopaction appref, :log, {device, buf}, subscribers
         apploop appstate, subscribers
-
-      x ->
-        IO.inspect [:unmatched, x]
-        apploop appstate, subscribers
     end
   end
 
