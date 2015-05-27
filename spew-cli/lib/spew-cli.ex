@@ -3,7 +3,11 @@ defmodule SpewCLI do
   alias SpewCLI.Cmd
 
   @cmds [
+    Cmd.Appliances,
     Cmd.Start,
+    #Cmd.Stop,
+    Cmd.Run,
+    #Cmd.Kill,
     Cmd.Log,
     Cmd.Attach
   ]
@@ -18,7 +22,7 @@ defmodule SpewCLI do
     usage: spew-cli cmd [options] [args]
 
     args:
-      #{Cmd.Start.shorthelp}
+    #{for mod <- @cmds, do: "\t" <> mod.shorthelp <> "\n"}
     """
   end
   def main([cmd | args]) do
@@ -31,11 +35,22 @@ defmodule SpewCLI do
     name = :"spew-#{gen_ref}"
 
     :os.cmd('epmd -daemon')
-    {:ok, _} = :net_kernel.start [name]
+
+    {:ok, _} = :net_kernel.start [name, :longnames]
+    #[_, host] = "#{node}" |> String.split "@"
+    host = "127.0.0.1"
+    :pong = :net_adm.ping :'spew@#{host}'
+    :global.sync
+  end
+
+  def host do
+    host = "127.0.0.1"
+    :'spew@#{host}'
   end
 
   defp gen_ref do
-    :crypto.hash(:sha256, :erlang.term_to_binary(make_ref))
+    ref = :crypto.rand_bytes 32
+    :crypto.hash(:sha256, :erlang.term_to_binary(ref))
       |> Base.encode16
       |> String.slice(0, 7)
       |> String.downcase
