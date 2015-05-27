@@ -122,3 +122,4 @@ nodes through gproc.
  - Add upstart service file
  - Add init.d script
  - Generate deb/rpm package?
+ - Ensure appref vs appref_or_name for subscribe/unsubscribe and similar spew-cli

@@ -8,7 +8,7 @@ defmodule Spew.Appliance.Manager do
   defmodule Supervision do
   end
 
-  @name :procmanager
+  @name {:global, __MODULE__}
 
   defstruct apprefs: [],
     appliances: %{},
@@ -20,6 +20,7 @@ defmodule Spew.Appliance.Manager do
   def delete(appref), do: GenServer.call(@name, {:delete, appref})
   def list, do: GenServer.call(@name, :list)
   def get(appref), do: GenServer.call(@name, {:get, appref})
+  def get_by_name_or_ref(appref_or_name), do: GenServer.call(@name, {:get_by_name_or_ref, appref_or_name})
   def set(appref, k, v), do: GenServer.call(@name, {:set, appref, {k, v}})
   def await(appref, ev, timeout \\ :infinity) do
     {:ok, callbackref} = GenServer.call(@name, {:await, appref, ev})
@@ -108,6 +109,7 @@ defmodule Spew.Appliance.Manager do
                   _from,
                   state = %Self{appliances: apps, supervision: sup}) do
 
+    Process.exit appref[:apploop], :kill
     Logger.debug "manager: removing app #{appref}"
     apps = Dict.delete apps, appref
     sup = Dict.delete sup, appref
@@ -128,6 +130,29 @@ defmodule Spew.Appliance.Manager do
     case apps[appref] do
       nil -> {:reply, {:error, :not_found}, state}
       appcfg -> {:reply, {:ok, {appref, appcfg}}, state}
+    end
+  end
+
+  def handle_call({:get_by_name_or_ref, appref_or_name},
+                  _from,
+                  state = %Self{appliances: apps}) do
+
+    case apps[appref_or_name] do
+      nil when appref_or_name === nil ->
+        {:reply, {:error, :not_found}, state}
+
+      nil ->
+        rest = Enum.filter apps, fn({_appref, appcfg}) -> appcfg[:appcfg][:name] === appref_or_name end
+        IO.inspect apps
+        case rest do
+          [appref_and_appcfg] ->
+            {:reply, {:ok, appref_and_appcfg}, state}
+          [] ->
+            {:reply, {:error, :not_found}, state}
+        end
+
+      appcfg ->
+        {:reply, {:ok, {appref_or_name, appcfg}}, state}
     end
   end
 
@@ -174,6 +199,15 @@ defmodule Spew.Appliance.Manager do
         end
 
         apprefs = List.keydelete apprefs, monref, 1
+
+        apps = case apps[appref][:cfgref] do
+          nil ->
+            spawn_link fn -> __MODULE__.delete appref end
+          _ ->
+            apps
+        end
+
+
         {:noreply, %{state | :apprefs => apprefs, :appliances => apps}}
 
       nil ->

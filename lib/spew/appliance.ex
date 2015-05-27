@@ -1,5 +1,7 @@
 defmodule Spew.Appliance do
 
+  require Logger
+
   alias Spew.Appliance.Config
   alias Spew.Appliance.Manager
 
@@ -33,36 +35,61 @@ defmodule Spew.Appliance do
       {:error, {:not_found, _}} = e ->
         e
 
-      {:ok, {_cfgref, cfgappopts}} ->
+      {:ok, {cfgref, cfgappopts}} ->
         #appopts = Map.merge cfgappopts, appopts
         appopts = deepmerge appopts, cfgappopts
+        appopts = Dict.put appopts, :cfgref, cfgref
         module = atom_to_module appopts.type
+
 
         appopts = %{appopts | :handler => module}
         {ref, parent} = {make_ref, self}
 
-        pid = spawn fn ->
+        {pid, monref} = spawn_monitor fn ->
           case module.run appopts, opts do
             {:ok, state} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state)
               send parent, {ref, res}
               {:ok, {_, appstate}} = Manager.get appref
-              apploop appstate
+
+              subscribers = Enum.reduce opts[:subscribe], %{}, fn
+                ({action, who}, acc) ->
+                  Dict.put acc, action, [who]
+
+                (action, acc) ->
+                  Dict.put acc, action, [parent]
+              end
+
+              apploop appstate, subscribers
 
             {:ok, state, monitor} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state, monitor)
               send parent, {ref, res}
               {:ok, {_, appstate}} = Manager.get appref
               Process.monitor monitor
-              apploop appstate
+
+              subscribers = Enum.reduce opts[:subscribe], %{}, fn
+                ({action, who}, acc) ->
+                  Dict.put acc, action, [who]
+
+                (action, acc) ->
+                  Dict.put acc, action, [parent]
+              end
+
+              apploop appstate, subscribers
 
             {:error, _err} = error ->
               send parent, {ref, error}
           end
         end
 
-        receive do
-          {^ref, res} -> res
+        exitstate = receive do
+          {^ref, res} ->
+            true = Process.demonitor monref
+            res
+
+          {:DOWN, _ref, :process, ^pid, res} ->
+            {:error, res}
         after
           5000 ->
             Process.exit pid, :kill
@@ -71,21 +98,28 @@ defmodule Spew.Appliance do
     end
   end
 
+
   @doc """
   Message the app
   """
-  def subscribe(appref, action) do
-    {:ok, {appref, appcfg}} = Manager.get appref
-    send appcfg[:apploop], {:subscribe, appref, {action, self}}
-    :ok
+  def subscribe(appref, action, who \\ nil) do
+    Logger.debug "subscribe #{appref} -> #{action}"
+    case Manager.get appref do
+      {:ok, {appref, appcfg}} ->
+        send appcfg[:apploop], {:subscribe, appref, {action, who || self}}
+        :ok
+
+      {:error, _} = res ->
+        res
+    end
   end
 
   @doc """
   Unsubscribe from appliance event
   """
-  def unsubscribe(appref, action) do
+  def unsubscribe(appref, action, who \\ nil) do
     {:ok, {appref, appcfg}} = Manager.get appref
-    send appcfg[:apploop], {:unsubscribe, appref, {action, self}}
+    send appcfg[:apploop], {:unsubscribe, appref, {action, who || self}}
     :ok
   end
 
@@ -101,6 +135,7 @@ defmodule Spew.Appliance do
   def notify(appref, action, ev) do
     {:ok, {appref, appcfg}} = Manager.get appref
     send appcfg[:apploop], {action, appref, ev}
+
     :ok
   end
 
@@ -146,14 +181,16 @@ defmodule Spew.Appliance do
         end
         apploop appstate, subscribers
 
-      #{action, ^appref, term} ->
-
       {:input, ^appref, buf} ->
         :ok = :exec.send appstate[:runstate][:extpid], buf
         apploop appstate, subscribers
 
       {device, _pid, buf} when device in [:stderr, :stdout] ->
-        loopaction appref, :log, buf, subscribers
+        loopaction appref, :log, {device, buf}, subscribers
+        apploop appstate, subscribers
+
+      x ->
+        IO.inspect [:unmatched, x]
         apploop appstate, subscribers
     end
   end
@@ -171,35 +208,36 @@ defmodule Spew.Appliance do
       true ->
         []
     end
+
     for pid <- push || [], do:
       send(pid, {action, appref, term})
   end
 
   # merge a into b
-  defp deepmerge(%{} = b, %{} = a) do
-    Map.merge norm(a), norm(b), fn
-      (_k, a1, b1) when is_map(a) and is_map(b) ->
+  defp deepmerge(%{} = a, %{} = b) do
+    Map.merge norm(b), norm(a), fn
+      (_k, b1, a1) when is_map(a) and is_map(b) ->
         deepmerge(b1, a1)
 
       # default to overwrite value if not map/list
-      (_k, _a1, b1) ->
-        b1
+      (_k, _b1, a1) ->
+        a1
     end
   end
-  defp deepmerge(b, []), do: b
-  defp deepmerge(b, [{_,_} | _] = a) when is_list(a) do
+  defp deepmerge(a, []), do: a
+  defp deepmerge(a, [{_,_} | _] = b) when is_list(a) do
     Dict.merge a, b, fn
-      (_k, a1, b1) when is_list(a) and is_list(b) ->
-        deepmerge(a1, b1)
-        
+      (_k, b1, a1) when is_list(a) and is_list(b) ->
+        deepmerge a1, b1
+
       # default to overwrite value if not map/list
-      (_k, _a1, b1) ->
-        b1
+      (_k, _b1, a1) ->
+        a1
     end
   end
   defp deepmerge(_a, b), do: b
 
-  defp norm(%{} = x), do: Map.merge(%{}, x)
+  defp norm(%{} = x), do: Map.delete(x, :__struct__)
   defp norm([]), do: %{}
   defp norm([{_,_}|_] = x), do: Enum.into(x, %{})
 

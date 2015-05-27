@@ -152,6 +152,9 @@ defmodule Spew.Appliance.Config do
       {:reply, {:ok, apps}, state}
     end
 
+    def handle_call({:fetch, nil}, _from, %Self{appliances: apps} = state) do
+      {:reply, {:ok, {nil, %Item{}}}, state}
+    end
     def handle_call({:fetch, cfgref_or_name}, _from, %Self{appliances: apps} = state) do
       case apps[cfgref_or_name] do
         nil ->
