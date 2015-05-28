@@ -136,9 +136,14 @@ defmodule Spew.Appliances.Systemd do
 
   def status(appstate) do
     # note that if there are unleft messages in mailbox these will be
-    # returned here. probably upstream error....
+    # returned here. probably upstream error.... spawn new task
     executable = System.find_executable("machinectl")
-    case :exec.run '#{executable} status #{appstate.appcfg.name}', [:stdout, :stderr, :sync] do
+
+    t = Task.async fn ->
+      :exec.run '#{executable} status #{appstate.appcfg.name}', [:stdout, :stderr, :sync]
+    end
+
+    case Task.await t do
       {:ok, _} ->
         {_, _state} = appstate[:state]
 
