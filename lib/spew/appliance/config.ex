@@ -24,14 +24,14 @@ defmodule Spew.Appliance.Config do
   end
 
 
-  @name :appconfigserver
+  @name __MODULE__.Server
 
   @doc """
   Loads a configuration file, if none are specified all the
   currently loaded configuration files are loaded
   """
-  def load,       do: GenServer.call(@name, :load_cfg)
-  def load(file), do: GenServer.call(@name, {:load_cfg, file})
+  def load, do: GenServer.call(@name, :load_cfg)
+  def load(file, opts), do: GenServer.call(@name, {:load_cfg, file, opts})
 
   @doc """
   Unloads a configuration file.
@@ -78,7 +78,7 @@ defmodule Spew.Appliance.Config do
 
     require Logger
 
-    @name :appconfigserver
+    @name __MODULE__
 
     defstruct files: [],
               appliances: %{}
@@ -91,18 +91,18 @@ defmodule Spew.Appliance.Config do
     end
 
     def init([]) do
-      load_files %Self{
-        files: []
+      load_files [], %Self{
+        files: Application.get_env(:spew, :appliance)[:config]
       }
     end
 
     def handle_call(:load_cfg, _from, state) do
-      {:ok, state} = load_files state
+      {:ok, state} = load_files [], state
       {:reply, :ok, state}
     end
 
-    def handle_call({:load_cfg, file}, _from, state) do
-      {:ok, state} = load_files [file], state
+    def handle_call({:load_cfg, file, opts}, _from, state) do
+      {:ok, state} = load_files [file], opts, state
       {:reply, :ok, state}
     end
 
@@ -202,8 +202,8 @@ defmodule Spew.Appliance.Config do
     # file is removed unless they have a running appliance using that
     # config
     # @todo ensure that running appliances does not get removed
-    defp load_files(%Self{files: files} = state), do: load_files(files, state)
-    defp load_files(files, %Self{files: oldfiles, appliances: apps} = state) do
+    defp load_files(opts, %Self{files: files} = state), do: load_files(files, opts, state)
+    defp load_files(files, opts, %Self{files: oldfiles, appliances: apps} = state) do
       # remove old config
       # @todo ensure that nothing is running with this config
       apps = Enum.reduce apps, apps, fn({cfgref, vals}, acc) ->
@@ -214,8 +214,21 @@ defmodule Spew.Appliance.Config do
         end
       end
 
+      {parser, txt} = case opts[:parser] do
+        nil -> {&proc_file/1, "exs"}
+        mod -> {&mod.parse/1, "#{mod}"}
+      end
+
       apps = Enum.reduce files, apps, fn(file, acc) ->
-        case proc_file file do
+        {file, parser, txt} = case file do
+          {file, mod} ->
+            {file, &mod.parse/1, "#{mod}"}
+
+          file ->
+            {file, parser, txt}
+        end
+
+        case parser.(file) do
           {:ok, newacc} ->
             acc = insert_apps newacc, acc
 
@@ -223,6 +236,11 @@ defmodule Spew.Appliance.Config do
             Logger.warn "failed to process config: #{file}, #{inspect e}"
             acc
         end
+      end
+
+      files = Enum.map files, fn
+        ({f, p}) -> "#{p}##{f}"
+        (f) -> "#{txt}##{f}"
       end
 
       files = Enum.sort (files ++ oldfiles) |> Enum.uniq

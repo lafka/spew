@@ -1,7 +1,7 @@
 use Mix.Config
 
 config :spew, :appliance,
-  config: "priv/appliances.config"
+  config: [{"priv/dev.config", Spew.Appliance.ConfigParser}]
 
 config :logger, :console,
   level: :info,

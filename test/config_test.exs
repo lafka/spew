@@ -59,4 +59,11 @@ defmodule ConfigTest do
     {:ok, {^newcfgref, vals}} = Config.fetch newcfgref
     assert vals.appliance === ["/bin/ls", []]
   end
+
+  test "parser" do
+    assert :ok = Config.load "test/config/parser.config",
+                             parser: Spew.Appliance.ConfigParser
+
+    IO.inspect Config.fetch
+  end
 end
