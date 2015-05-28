@@ -37,7 +37,7 @@ defmodule Spew.Appliance do
 
       {:ok, {cfgref, cfgappopts}} ->
         #appopts = Map.merge cfgappopts, appopts
-        appopts = deepmerge appopts, cfgappopts
+        appopts = Spew.Utils.deepmerge appopts, cfgappopts
         appopts = Dict.put appopts, :cfgref, cfgref
         module = atom_to_module appopts.type
 
@@ -46,13 +46,16 @@ defmodule Spew.Appliance do
         {ref, parent} = {make_ref, self}
 
         {pid, monref} = spawn_monitor fn ->
+          runneropts = Dict.merge appopts[:runneropts] || [], maybe_unpack(appopts, opts)
+          appopts = Dict.put appopts, :runneropts, runneropts
+
           case module.run appopts, opts do
             {:ok, state} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state)
               send parent, {ref, res}
               {:ok, {_, appstate}} = Manager.get appref
 
-              subscribers = Enum.reduce opts[:subscribe], %{}, fn
+              subscribers = Enum.reduce opts[:subscribe] || [], %{}, fn
                 ({action, who}, acc) ->
                   Dict.put acc, action, [who]
 
@@ -68,7 +71,7 @@ defmodule Spew.Appliance do
               {:ok, {_, appstate}} = Manager.get appref
               Process.monitor monitor
 
-              subscribers = Enum.reduce opts[:subscribe], %{}, fn
+              subscribers = Enum.reduce opts[:subscribe] || [], %{}, fn
                 ({action, who}, acc) ->
                   Dict.put acc, action, [who]
 
@@ -83,7 +86,7 @@ defmodule Spew.Appliance do
           end
         end
 
-        exitstate = receive do
+        receive do
           {^ref, res} ->
             true = Process.demonitor monref
             res
@@ -98,6 +101,43 @@ defmodule Spew.Appliance do
     end
   end
 
+
+  defp maybe_unpack(%{appliance: [spewtarget, %{type: :spew, tag: tag} = bopts]} = appcfg, opts) do
+    {:ok, target} = maybe_unpack2 spewtarget <> "/" <> tag, appcfg, opts
+
+    case bopts[:busybox] do
+      true ->
+        [root: {:busybox, target}]
+
+      _ ->
+        [root: {:chroot, target}]
+    end
+  end
+  defp maybe_unpack(%{appliance: [spewtarget, %{type: :spew} = bopts]} = appcfg, opts) do
+    {:ok, target} = maybe_unpack2 spewtarget, appcfg, opts
+
+    case bopts[:busybox] do
+      true ->
+        [root: {:busybox, target}]
+
+      _ ->
+        [root: {:chroot, target}]
+    end
+  end
+  defp maybe_unpack(_appcfg, _opts), do: []
+
+  defp maybe_unpack2(target, appcfg, opts) do
+    case SpewBuild.Build.find target do
+      {:ok, [spec]} ->
+        SpewBuild.Build.unpack spec
+
+      {:ok, specs} ->
+        {:error, {:multi_builds, specs}}
+
+      {:error, _err} = res ->
+          res
+    end
+  end
 
   @doc """
   Message the app
@@ -139,7 +179,6 @@ defmodule Spew.Appliance do
     :ok
   end
 
-  defp apploop(appstate), do: apploop(appstate, %{})
   defp apploop(appstate, subscribers) do
     appref = appstate[:appref]
     apppid = appstate[:runstate][:pid]
@@ -164,11 +203,7 @@ defmodule Spew.Appliance do
                                (subscribers[action] || []) -- from)
         apploop appstate, subscribers
 
-      {:DOWN, _ref, :process, ^apppid, _} = ev ->
-        pids = Enum.reduce subscribers,
-                           [],
-                           fn({_, pids}, acc) -> Enum.uniq(pids ++ acc) end
-        Enum.each pids, &(send &1, ev)
+      {:DOWN, _ref, :process, ^apppid, _} ->
         :ok
 
       {:DOWN, _ref, :process, pid, _} ->
@@ -209,34 +244,6 @@ defmodule Spew.Appliance do
       send(pid, {action, appref, term})
   end
 
-  # merge a into b
-  defp deepmerge(%{} = a, %{} = b) do
-    Map.merge norm(b), norm(a), fn
-      (_k, b1, a1) when is_map(a) and is_map(b) ->
-        deepmerge(b1, a1)
-
-      # default to overwrite value if not map/list
-      (_k, _b1, a1) ->
-        a1
-    end
-  end
-  defp deepmerge(a, []), do: a
-  defp deepmerge(a, [{_,_} | _] = b) when is_list(a) do
-    Dict.merge a, b, fn
-      (_k, b1, a1) when is_list(a) and is_list(b) ->
-        deepmerge a1, b1
-
-      # default to overwrite value if not map/list
-      (_k, _b1, a1) ->
-        a1
-    end
-  end
-  defp deepmerge(_a, b), do: b
-
-  defp norm(%{} = x), do: Map.delete(x, :__struct__)
-  defp norm([]), do: %{}
-  defp norm([{_,_}|_] = x), do: Enum.into(x, %{})
-
   @doc """
   Stops a running appliance
   """
@@ -245,9 +252,10 @@ defmodule Spew.Appliance do
       {:ok, {appref, appcfg}} ->
         :ok = appcfg[:handler].stop appcfg
 
-        if true !== opts[:keep] do
+        if nil !== opts[:keep] and true !== opts[:keep] do
           :ok = Manager.delete appref
         end
+
         :ok
 
       err ->
@@ -268,6 +276,9 @@ defmodule Spew.Appliance do
           _ ->
             {:error, {:running, appref}}
         end
+
+      {:error, :not_found} ->
+        :ok
 
       err ->
         err

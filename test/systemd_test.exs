@@ -35,7 +35,7 @@ defmodule SystemdTest do
   defp tokenize(buf), do: String.replace("#{buf}", ~r/[^a-zA-Z0-9-_]/, "-")
 
   test "status", ctx do
-    {:ok, cfgref} = Appliance.create testname(ctx), %Config.Item{
+    {:ok, _cfgref} = Appliance.create testname(ctx), %Config.Item{
       name: testname(ctx),
       type: :systemd,
       runneropts: [
@@ -44,19 +44,12 @@ defmodule SystemdTest do
       ]
     }
 
-    {:ok, appref} = Appliance.run testname(ctx)
+    {:ok, appref} = Appliance.run testname(ctx), %{}, [subscribe: [:log]]
 
-    assert_receive {:stdout, _, "systemd-container\n"}, 1000
+    assert_receive {:log, ^appref, {:stdout, "systemd-container\n"}}, 1000
 
-    # There will be some weird stderr messages, completely version
-    # dependant... flush tehm
-    flush
     assert {:ok, {_, :alive}} = Appliance.status appref
-
-    :timer.sleep 1000
-    assert_receive {:DOWN, _ref, :process, _pid, :normal}, 1000
-    flush
-
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 2000
     assert {:ok, {_, :stopped}} = Appliance.status appref
   end
 
@@ -65,39 +58,34 @@ defmodule SystemdTest do
 #  end
 #
   test "archive chroot", ctx do
-    {:ok, cfgref} = Appliance.create testname(ctx), %Config.Item{
+    {:error, :checksum} = Appliance.run nil, %{
       name: testname(ctx),
       type: :systemd,
-      runneropts: [
-        command: ["/dummy"],
-      ]
-    }
-
-    {:error, :checksum} = Appliance.run testname(ctx), %{
       runneropts: [root: {:archive, "test/spew-builds/dummy-checksum-fail/1760bbafbd386052ce1810891ea5a22bf0d4ed8.tar.gz"}]
     }
 
-    {:error, :signature} = Appliance.run testname(ctx), %{
+    {:error, :signature} = Appliance.run nil, %{
+      name: testname(ctx),
+      type: :systemd,
       runneropts: [root: {:archive, "test/spew-builds/dummy-gpg-fail/1760bbafbd386052ce1810891ea5a22bf0d4ed8e.tar.gz"}]
     }
 
-    {:ok, appref} = Appliance.run testname(ctx), %{
+    {:ok, appref} = Appliance.run nil, %{
+      name: testname(ctx),
+      type: :systemd,
       runneropts: [
         command: ["/bin/busybox sh -c 'echo systemd-container; sleep 1'"],
         root: {:archive, "/home/user/.spew/builds/dummy/0.0.3/735eea0793cf82dfe22e8e1ee2f9460a07ff379b/adc83b19e793491b1c6ea0fd8b46cd9f32e592fc/a7b979c840c366668920d7b9ba1056102c1f700b.tar.gz"}
       ]
-    }
+    }, [subscribe: [:log]]
 
-    assert_receive {:stdout, _, "systemd-container\n"}, 1000
+    assert_receive {:log, appref, {:stdout, "systemd-container\n"}}, 1000
 
     # There will be some weird stderr messages, completely version
     # dependant... flush them
-    flush
     assert {:ok, {_, :alive}} = Appliance.status appref
 
-    :timer.sleep 1000
-    assert_receive {:DOWN, _ref, :process, _pid, :normal}, 1000
-    flush
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 2000
 
     assert {:ok, {_, :stopped}} = Appliance.status appref
   end
@@ -108,7 +96,7 @@ defmodule SystemdTest do
 
   test "bridge network", ctx do
     # test for non existing bridge
-    {:ok, cfgref} = Appliance.create testname(ctx) <> "a", %Config.Item{
+    {:ok, _cfgref} = Appliance.create testname(ctx) <> "a", %Config.Item{
       name: "bridge",
       type: :systemd,
       runneropts: [
@@ -119,7 +107,7 @@ defmodule SystemdTest do
     {:error, {:no_such_iface, _}} = Appliance.run testname(ctx) <> "a"
 
     # test for non-bridge iface
-    {:ok, cfgref} = Appliance.create testname(ctx) <> "b", %Config.Item{
+    {:ok, _cfgref} = Appliance.create testname(ctx) <> "b", %Config.Item{
       name: "bridge",
       type: :systemd,
       runneropts: [
@@ -130,7 +118,7 @@ defmodule SystemdTest do
     {:error, {:iface_not_bridge, _}} = Appliance.run testname(ctx) <> "b"
 
     # run with the bridge
-    {:ok, cfgref} = Appliance.create testname(ctx), %Config.Item{
+    {:ok, _cfgref} = Appliance.create testname(ctx), %Config.Item{
       name: "bridge",
       type: :systemd,
       runneropts: [
@@ -140,7 +128,7 @@ defmodule SystemdTest do
       ]
     }
 
-    {:ok, appref} = Appliance.run testname(ctx)
+    {:ok, _appref} = Appliance.run testname(ctx), %{}, [subscribe: [:log]]
     buf = collect 1000
     # check that network is okey, we assume that the host system
     # manages to ensure the bridge availability
@@ -150,7 +138,7 @@ defmodule SystemdTest do
   defp collect(timeout), do: collect("", timeout)
   defp collect(buf, timeout) do
     receive do
-      {:stdout, _, data} ->
+      {:log, _, {:stdout, data}} ->
         collect(buf <> data, timeout)
     after
       timeout ->
@@ -169,12 +157,50 @@ defmodule SystemdTest do
 #  test "macvlan network" do
 #    assert nil, "macvlan net test not implemented"
 #  end
+#
+#  test "expose ports" do
+#    assert nil, "expose ports test not implemented"
+#  end
+#
+  test "tmpfs", ctx do
+    {:ok, _cfgref} = Appliance.run nil, %{
+      name: testname(ctx),
+      type: :systemd,
+      runneropts: [
+        command: ["/bin/busybox mount"],
+        root: {:busybox, "./test/chroot"},
+        tmpfs: ["/test-tmpfs"]
+      ]
+    }, [subscribe: [:log]]
 
-  test "expose ports" do
-    assert nil, "expose ports test not implemented"
+    buf = collect(1000)
+    assert String.match? buf, ~r/\/test-tmpfs/
   end
 
-  test "mounts" do
-    assert nil, "mount test not implemented"
+  test "mounts", ctx do
+    {:ok, _cfgref} = Appliance.run nil, %{
+      name: testname(ctx),
+      type: :systemd,
+      runneropts: [
+        command: ["/bin/busybox mount"],
+        root: {:busybox, "./test/chroot"},
+        mount: [
+          "./:/bind:ro"
+        ]
+      ]
+    }, [subscribe: [:log]]
+
+    buf = collect(1000)
+    assert String.match? buf, ~r/\/bind/
+  end
+
+  test "spew-build archive" do
+    {:ok, appref} = Appliance.run nil, %{
+      name: "test-spew-build-archive",
+      type: :systemd,
+      appliance: ["dummy", %{type: :spew, tag: "0.0.3", busybox: true}]
+    }
+
+    assert :ok = Appliance.stop appref
   end
 end

@@ -123,3 +123,27 @@ nodes through gproc.
  - Add init.d script
  - Generate deb/rpm package?
  - Ensure appref vs appref_or_name for subscribe/unsubscribe and similar spew-cli
+
+
+## Appliance lifecycle
+ - (maybe) the appliance config is created (from file or at runtime)
+ - the appliance is ran through the handler (shell, void, systemd etc)
+  -> register with Manager (with a pid to monitor if handler supports it)
+  -> enter `apploop`
+   -> dies (killed, stopped or external process finished)
+  -> Manager may receive a :DOWN message, in which case:
+   -> send a :stop or {:crash, \_} event
+   -> remove the monitor
+
+## Finding stufs
+
+An appliance consists of two things, an appliance config and a
+instance config. The appliance config may be nested (derived from a 
+different config). Appliance config is stored in Spew.Appliance.Config
+and runtime info is stored in Spew.Appliance.Manager.
+
+Spew.Appliance.Config is the list of runnable configurations, whilest
+Spew.Appliance.Manager contains the things that is actually runnable.
+
+A instance can be run with a transient config, meaning everything is
+configured at runtime and nothing is stored in Spew.Appliance.Config.

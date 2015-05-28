@@ -39,8 +39,15 @@ defmodule SpewCLI do
     {:ok, _} = :net_kernel.start [name, :longnames]
     #[_, host] = "#{node}" |> String.split "@"
     host = "127.0.0.1"
-    :pong = :net_adm.ping :'spew@#{host}'
-    :global.sync
+    case :net_adm.ping :'spew@#{host}' do
+      :pong ->
+        :global.sync
+
+      :pang ->
+        message = "failed to connect to spew server: spew@#{host}"
+        IO.puts :stderr, IO.ANSI.format([:red, :bright, message])
+        System.halt 1
+    end
   end
 
   def host do

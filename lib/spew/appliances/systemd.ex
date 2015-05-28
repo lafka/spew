@@ -21,7 +21,7 @@ defmodule Spew.Appliances.Systemd do
             "udp/" <> 1..65535 <> ":" 1..65535],
     user: user(),
     mount: [
-      path() :: HostPath, <> "/" <> path() :: ContainerPath <> "/" string :: Opts
+      path() :: HostPath, <> ":" <> path() :: ContainerPath <> ":" string :: Opts
     ],
     env: %{
       key() => val()
@@ -30,8 +30,8 @@ defmodule Spew.Appliances.Systemd do
   """
 
   def run(appopts, _opts) do
-    runneropts = Dict.put_new appopts[:runneropts], :name, appopts[:name]
-    case build_cmd runneropts do
+    runneropts = Dict.put_new appopts[:runneropts] || [], :name, appopts[:name]
+    case build_cmd Enum.into(runneropts, []), appopts do
       {:ok, cmd, cont} ->
         bin = System.find_executable "systemd-nspawn"
         shellopts = %{appopts | :runneropts => cmd,
@@ -46,16 +46,16 @@ defmodule Spew.Appliances.Systemd do
     end
   end
 
-  defp build_cmd(vals), do: build_cmd(vals, [], [])
-  defp build_cmd([], acc, cont), do: {:ok, ["sudo systemd-nspawn" | acc], cont}
+  defp build_cmd(vals, opts), do: build_cmd(vals, opts, [], [])
+  defp build_cmd([], opts, acc, cont), do: {:ok, ["sudo systemd-nspawn" | acc], cont}
 
-  defp build_cmd([{:name, v} | rest], acc, cont), do:
-    build_cmd(rest, ["--machine", v | acc], cont)
+  defp build_cmd([{:name, v} | rest], opts, acc, cont), do:
+    build_cmd(rest, opts, ["--machine", v | acc], cont)
 
-  defp build_cmd([{:command, v} | rest], acc, cont), do:
-    build_cmd(rest, acc ++ [v], cont)
+  defp build_cmd([{:command, v} | rest], appcfg, acc, cont), do:
+    build_cmd(rest, appcfg, acc ++ [appcfgtpl(Enum.join(v, " "), appcfg)], cont)
 
-  defp build_cmd([{:root, {:archive, archive}} | rest], acc, cont) do
+  defp build_cmd([{:root, {:archive, archive}} | rest], opts, acc, cont) do
     case verify_archive archive do
       :ok ->
         shasum = Path.basename archive, ".tar.gz"
@@ -65,13 +65,13 @@ defmodule Spew.Appliances.Systemd do
           File.mkdir_p target
           :erl_tar.extract archive, [:compressed, {:cwd, target}]
         end
-        build_cmd(rest, ["-D", target | acc], [unpack | cont])
+        build_cmd(rest, opts, ["-D", target | acc], [unpack | cont])
 
       {:error, _} = res ->
           res
     end
   end
-  defp build_cmd([{:root, {:busybox, dir}} | rest], acc, cont) do
+  defp build_cmd([{:root, {:busybox, dir}} | rest], opts, acc, cont) do
     case System.find_executable "busybox" do
       nil ->
         {:error, "busybox not installed"}
@@ -83,28 +83,76 @@ defmodule Spew.Appliances.Systemd do
           File.chmod! path, 777
         end
 
-        build_cmd(rest, ["-D #{Path.absname(dir)}" | acc], cont)
+        build_cmd(rest, opts, ["-D #{Path.absname(dir)}" | acc], cont)
+    end
+  end
+  defp build_cmd([{:root, {:chroot, dir}} | rest], opts, acc, cont) do
+    cond do
+      ! File.exists? dir ->
+        {:error, {:enoent, dir}}
+      ! File.dir? dir ->
+        {:error, {:eisfile, dir}}
+      true ->
+        build_cmd rest, opts, ["-D", Path.absname(dir) | acc], cont
     end
   end
 
-  defp build_cmd([{:network, net} | rest], acc, cont) do
+  defp build_cmd([{:network, net} | rest], opts, acc, cont) do
     case build_net_cmd(net, rest, acc) do
       {:ok, [rest, acc]} ->
-        build_cmd rest, acc, cont
+        build_cmd rest, opts, acc, cont
 
       {:error, _} = res ->
         res
     end
   end
 
-  defp build_cmd([{k, _v} | _rest], _acc, _cont), do: {:error, "unsupported key: `#{k}`"}
+  defp build_cmd([{:tmpfs, target} | rest], opts, acc, cont) do
+    build_cmd rest, opts, ["--tmpfs", target | acc], cont
+  end
+
+  defp build_cmd([{:mount, mounts} | rest], appcfg, acc, cont) do
+    acc = Enum.reduce mounts, acc, fn(mount, acc) ->
+      [item | opts] = String.split mount, ":"
+      item = expandpath item, appcfg
+
+      unless File.exists? item do
+        raise ArgumentError, message: item
+      end
+
+      case opts do
+        [] -> ["--bind", item | acc]
+        [target] -> ["--bind", item <> ":" <> target | acc]
+        [target, "ro"] -> ["--bind-ro", item <> ":" <> target | acc]
+      end
+    end
+
+    build_cmd rest, appcfg, acc, cont
+  rescue e in ArgumentError ->
+    {:error, {:enoent, e.message}}
+  end
+
+  defp build_cmd([{k, _v} | _rest], _opts, _acc, _cont), do: {:error, "unsupported key: `#{k}`"}
+
+  defp expandpath(path, appcfg) do
+    appcfgtpl(path, appcfg) |> Path.expand
+  end
+
+  defp appcfgtpl(buf, appcfg) do
+    Regex.replace ~r/{{([^}]*)}}/,
+      buf,
+      fn(ctx, k) ->
+        appcfg[String.to_atom(k)]
+      end
+  end
+
 
   defp verify_archive(archive) do
     shasum = Path.basename archive, ".tar.gz"
     cond do
       ! File.exists? archive ->
         {:error, {:archive, :not_found, archive}}
-      
+
       shasum != Spew.Utils.hashfile(:sha, archive) ->
         {:error, :checksum}
 
@@ -132,6 +180,7 @@ defmodule Spew.Appliances.Systemd do
   end
 
   def stop(appcfg, opts \\ []) do
+    Spew.Appliances.Shell.stop appcfg, opts
   end
 
   def status(appstate) do
@@ -152,6 +201,4 @@ defmodule Spew.Appliances.Systemd do
         {nil, :stopped}
     end
   end
-
-  defp hash
 end

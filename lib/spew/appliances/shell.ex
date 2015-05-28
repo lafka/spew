@@ -1,5 +1,7 @@
 defmodule Spew.Appliances.Shell do
 
+  require Logger
+
   use Bitwise
 
   # @todo
@@ -29,6 +31,8 @@ defmodule Spew.Appliances.Shell do
 
       opts = [:stdin, {:stdout, self}, :monitor, {:stderr, self}]
 
+      Logger.debug "exec: #{cmd}"
+
       {:ok, pid, extpid} = :exec.run_link cmd, opts
 
       {:ok, [
@@ -55,7 +59,7 @@ defmodule Spew.Appliances.Shell do
   end
 
   def status(appstate) do
-    {_, state} =  appstate[:state]
+    {_, _state} =  appstate[:state]
   end
 end
 

@@ -1,4 +1,4 @@
-defmodule ShellApplianceTest do
+defmodule DaemonTest do
   use ExUnit.Case, async: false
 
   alias Spew.Appliance
@@ -10,7 +10,7 @@ defmodule ShellApplianceTest do
   setup ctx do
     Config.unload :all
 
-    {:ok, cfgref} = Appliance.create testname(ctx), %Config.Item{
+    {:ok, _cfgref} = Appliance.create testname(ctx), %Config.Item{
       name: testname(ctx),
       type: :systemd,
       runneropts: [
@@ -48,7 +48,7 @@ defmodule ShellApplianceTest do
       ]
     }
 
-    {:ok, appcfg} = Manager.get(appref)
+    {:ok, _appcfg} = Manager.get(appref)
     Appliance.subscribe appref, :log
 
     assert_receive {:log, appref, {:stdout, "1\n"}}, 200
@@ -58,7 +58,7 @@ defmodule ShellApplianceTest do
     assert_receive {:log, appref, {:stdout, "5\n"}}, 200
     assert_receive {:log, appref, {:stdout, "6\n"}}, 200
 
-    assert_receive {:DOWN, _ref, :process, _pid, :normal}, 1000
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 1000
 
     # wait for release of chroot
     :timer.sleep @cooldown
@@ -70,11 +70,11 @@ defmodule ShellApplianceTest do
         command: ["/bin/busybox sh -c 'read line; echo $line'"],
     ]}
 
-    {:ok, appcfg} = Manager.get(appref)
+    {:ok, _appcfg} = Manager.get(appref)
     Appliance.subscribe appref, :log
 
     Appliance.notify appref, :input, "hello\n"
-    assert_receive {:log, appref, {:stdout, "hello\n"}}, 2000
+    assert_receive {:log, ^appref, {:stdout, "hello\n"}}, 2000
 
     # wait for release of chroot
     :timer.sleep @cooldown

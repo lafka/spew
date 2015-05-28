@@ -4,7 +4,7 @@ config :spew, :appliance,
   config: [{"priv/dev.config", Spew.Appliance.ConfigParser}]
 
 config :logger, :console,
-  level: :info,
+  level: :debug,
   format: "$date $time [$level] $metadata$message\n",
   metadata: []
 

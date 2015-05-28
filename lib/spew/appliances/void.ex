@@ -27,7 +27,8 @@ defmodule Spew.Appliances.Void do
     after 1000 -> throw :timeout
     end
 
-    send :procmanager, {:event, appcfg[:appref], :stop}
+    p = :global.whereis_name Manager
+    send p, {:event, appcfg[:appref], :stop}
 
     receive do {^ref, {:ok, :stop}} -> :ok
     after 1000 -> {:error, :timeout} end

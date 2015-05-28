@@ -1,5 +1,7 @@
 defmodule Spew.Appliance.ConfigParser do
 
+  require Logger
+
   @moduledoc """
   Parse configuration
   """
@@ -7,99 +9,136 @@ defmodule Spew.Appliance.ConfigParser do
   alias Spew.Appliance.Config.Item
 
   def parse(file) do
-    tree = File.stream!(file) |> Enum.reduce %{}, fn
-      ("#" <> _, acc) -> acc
-      ("\n", acc) -> acc
-      (line, acc) ->
+    Logger.debug "#{__MODULE__} processing: #{file}"
+    {cfgs, apps} = File.stream!(file) |> Enum.reduce {%{}, %{}}, fn
+      ("#" <> _, acc) ->
+        Process.put :line_num, Process.get(:line_num, 0) + 1
+        acc
+
+      ("\n", acc) ->
+        Process.put :line_num, Process.get(:line_num, 0) + 1
+        acc
+
+      # this is an actual appliance configuration
+      ("*" <> line = raw, {cfgacc, appacc}) ->
+        Process.put :line_num, Process.get(:line_num, 0) + 1
+        Process.put :line, raw
         [k, v] = String.split line, [" ", "\t"], parts: 2, trim: true
-        keyparts = String.split k, "."
-        insert_at keyparts, String.strip(v), acc
+        [app | _] = keyparts = String.split k, "."
+
+        cfgacc = Dict.put_new cfgacc, app, %Item{name: app}
+        cfgacc = line keyparts, String.strip(v), cfgacc
+        {cfgacc, appacc}
+
+      # this is the instance config
+      (line, {cfgacc, appacc}) ->
+        Process.put :line_num, Process.get(:line_num, 0) + 1
+        Process.put :line, line
+
+
+        [k, v] = String.split line, [" ", "\t"], parts: 2, trim: true
+        [app | _] = keyparts = String.split k, "."
+
+        appacc = Dict.put_new appacc,
+                              app,
+                              %{:name => app,:cfgrefs => {nil, []}}
+        appacc = line keyparts, String.strip(v), appacc, cfgacc
+
+        {cfgacc, appacc}
     end
 
-    apps = Enum.into tree["app"], %{}, fn({k, v}) ->
-      {app, _v} = {%Item{name: k}, v}
-        |> map_type(k)
-        |> map_depends
-        |> map_target
-        |> map_restart
-        |> map_service
-        |> map_runneropts
+    Process.delete :line
+    Process.delete :line_num
 
-      app = Map.put app, :file, file
-      cfgref = gen_ref(app)
-      app = Map.put app, :cfgref, cfgref
-
-      {cfgref, app}
-    end
-
-    {:ok, apps}
+    {:ok, cfgs, apps}
+  rescue e in [ArgumentError, MatchError] ->
+    IO.write "failed to process #{file}:#{Process.get(:line_num)}\nline: #{Process.get(:line)}"
+    IO.puts Exception.format_stacktrace
+    {:error, e}
   end
 
-  defp insert_at([k], val, acc), do:
-    Dict.put(acc, k, val)
-  defp insert_at([k | path], val, acc), do:
-    Dict.put(acc, k, insert_at(path, val, acc[k] || %{}))
+  defp line(k, v, acc), do: line(k, v, acc, %{})
+  defp line([app, "derive"], "*" <> cfgname, acc, cfgacc) do
+    case cfgacc[cfgname] do
+      nil ->
+        raise ArgumentError, message: "no such cfg: #{cfgname}"
 
-  defp map_type({item, %{"type" => "systemd"} = v}, _k), do:
-    {%{item | :type => :systemd}, Dict.delete(v, "type")}
-  defp map_type({item, %{"type" => "shell"} = v}, _k), do:
-    {%{item | :type => :shell}, Dict.delete(v, "type")}
-  defp map_type({item, %{"type" => "void"} = v}, _k), do:
-    {%{item | :type => :void}, Dict.delete(v, "type")}
-  defp map_type({item, v}, k), do:
-    raise(ArgumentError, message: "invalid type: #{v["type"]} for key app.#{k}.type")
+      %{cfgrefs: {_ancestorref, ancestorrefs}} = ancestor ->
 
-  defp map_depends({item, %{"depends" => deps} = v}) do
+        item = Spew.Utils.deepmerge ancestor, acc[app]
+        item = %{item |
+          :cfgrefs => {app, [cfgname | ancestorrefs]},
+          :name => acc[app].name
+        }
+
+        Map.put acc, app, item
+     end
+  end
+  defp line([_app, "derive"], _cfgname, _acc, _cfgacc), do:
+    raise(ArgumentError, message: "refusing to derive a instance (did you forget the `*` in front?)")
+
+  defp line([app, "type"], type, acc, _cfgacc) when type in ["systemd", "void", "shell"] do
+    Map.put acc, app, Map.put(acc[app], :type, String.to_atom(type))
+  end
+  defp line([_app, "type"] = k , type, _acc, _cfgacc), do:
+    raise(ArgumentError, message: "invalid type #{type} for #{inspect k}")
+
+  defp line([app, "depends"], deps, acc, _cfgacc) do
     deps = Enum.map String.split(deps, " "), fn
       ("service:" <> dep) ->
         {:service, dep}
     end
 
-    {%{item | :depends => deps}, Dict.delete(v, "depends")}
+    Map.put acc, app, Map.put(acc[app], :depends, deps)
   end
-  defp map_depends(v), do: v
 
-  defp map_target({item, %{"target" => target} = v}) do
-    {app, appopts} = case String.split(target, "#") do
-      [app] ->
-        {String.strip(app), [type: :spew]}
+  defp line([app, "target"], target, acc, _cfgacc) do
+    {targetapp, targetappopts} = case String.split(target, "#") do
+      [targetapp] ->
+        {String.strip(targetapp), [type: :spew]}
 
-      [app, appopts] ->
-        appopts = pair String.split(appopts, [":", " ", "\t", ","], trim: true)
-        appopts
+      [targetapp, targetappopts] ->
+        targetappopts = pair String.split(targetappopts, [":", " ", "\t", ","], trim: true)
 
-        {String.strip(app), appopts}
+        {String.strip(targetapp), targetappopts}
     end
 
-    {%{item | :appliance => [app, appopts]}, Dict.delete(v, "target")}
+    Map.put acc, app, Map.put(acc[app], :appliance, [targetapp, targetappopts])
   end
-  defp map_target(v), do: v
+
+  defp line([app, "service"], service, acc, _cfgacc) do
+    Map.put acc, app, Map.put(acc[app], :service, service)
+  end
+
+  defp line([app, "restart"], strategy, acc, _cfgacc) do
+    strategy = Enum.map(String.split(strategy, " "), &(String.to_atom(&1)))
+    Map.put acc, app, Map.put(acc[app], :restart, strategy)
+  end
+
+  defp line([app, "$", k], v, acc, _cfgacc) do
+    insert_at([app, :runneropts, String.to_atom(k)], String.split(v), acc)
+  end
+
+  defp line([app | key], v, _acc, _cfgacc) do
+    raise ArgumentError, message: "unknown definition: #{Enum.join(key, ".")}"
+  end
+
+
+  defp insert_at([k], val, acc) when is_map(acc) do
+    Map.put(acc, k, val)
+  end
+  defp insert_at([k | path], val, acc) when is_map(acc) do
+    Map.put(acc, k, insert_at(path, val, Map.get(acc, k) || %{}))
+  end
+  defp insert_at([k], val, acc) do
+    Dict.put(acc, k, val)
+  end
+  defp insert_at([k | path], val, acc) do
+    Dict.put(acc, k, insert_at(path, val, Dict.get(acc, k) || %{}))
+  end
+
 
   defp pair(pairs), do: pair(pairs, %{})
   defp pair([], acc), do: acc
   defp pair([k, v | rest], acc), do: pair(rest, Dict.put(acc, k, v))
-
-  defp map_restart({item, %{"restart" => restart} = v}) do
-    Enum.map(String.split(restart, " "), &(String.to_atom(&1)))
-    {%{item | :restart => restart}, Dict.delete(v, "restart")}
-  end
-  defp map_restart(v), do: v
-
-  # no concept of service just yet
-  #defp map_service({item, %{"service" => service} = v), do:
-  #  {%{item | :service => service}, Dict.delete(v, "service")}
-  #defp map_service(v), do: v
-  defp map_service({item, v}), do: {item, Dict.delete(v, "service")}
-
-  defp map_runneropts({item, v}) do
-    {%{item | :runneropts =>
-      Enum.into(v, [], fn({k,v}) ->
-        {String.to_atom(k), String.split(v, " ")}
-      end
-    )}, %{}}
-  end
-
-  defp gen_ref(%Item{} = vals) do
-    :crypto.hash(:sha256, :erlang.term_to_binary(vals)) |> Base.encode64
-  end
 end

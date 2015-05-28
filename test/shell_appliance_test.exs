@@ -15,13 +15,13 @@ defmodule ShellApplianceTest do
     {:error, {:missing_runtime, "/non-executable"}} = Appliance.run "non-executable"
 
     {:error, {:missing_runtime, "/non-executable"}} = Appliance.run "non-executable"
-    {:ok, appref} = Appliance.run "echo client"
-    {:ok, {appref, appstate}} = Manager.get(appref)
-    pid = appstate[:runstate][:pid]
+    {:ok, appref} = Appliance.run "echo client", %{}, [subscribe: [:log]]
+    {:ok, {appref, _appstate}} = Manager.get(appref)
 
     assert {:ok, {_, :alive}} = Appliance.status appref
-    assert_receive {:stdout, _, "hello\n"}, 100
-    assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 1000
+    assert_receive {:log, ^appref, {:stdout, "hello\n"}}, 100
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 2000
+
     assert {:ok, {_, :stopped}} = Appliance.status appref
     :ok = Appliance.delete appref
 
@@ -32,8 +32,14 @@ defmodule ShellApplianceTest do
     {:ok, {^appref, appstate}} = Manager.get(appref)
     pid = appstate[:runstate][:pid]
 
-    assert :ok = Appliance.stop appref
-    assert_receive {:DOWN, _ref, :process, ^pid, :normal}, 10000
+    assert Process.alive? pid
+
+    spawn fn ->
+      :timer.sleep 10;
+      :ok = Appliance.stop appref
+    end
+
+    assert_receive {:ev, appref, :stop}
 
     # Ensure it's removed from the manager when stop is called
     assert {:error, :not_found} = Manager.get appref

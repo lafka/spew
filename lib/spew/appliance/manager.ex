@@ -39,7 +39,7 @@ defmodule Spew.Appliance.Manager do
     GenServer.start_link Self, [], name: @name
   end
 
-  def init(opts) do
+  def init(_opts) do
     {:ok, %Self{}}
   end
 
@@ -57,7 +57,7 @@ defmodule Spew.Appliance.Manager do
 
   def handle_call({:run, [appcfg, runopts], runstate, monitor},
                   {from, _ref},
-                  state = %Self{apprefs: apprefs,
+                  state = %Self{
                                 appliances: apps,
                                 supervision: sups
                                 }) do
@@ -109,11 +109,10 @@ defmodule Spew.Appliance.Manager do
                   _from,
                   state = %Self{appliances: apps, supervision: sup}) do
 
-    Process.exit appref[:apploop], :kill
     Logger.debug "manager: removing app #{appref}"
     apps = Dict.delete apps, appref
     sup = Dict.delete sup, appref
-    {:reply, :ok, %{state | :appliances => apps}}
+    {:reply, :ok, %{state | :appliances => apps, :supervision => sup}}
   end
 
   def handle_call(:list,
@@ -143,7 +142,6 @@ defmodule Spew.Appliance.Manager do
 
       nil ->
         rest = Enum.filter apps, fn({_appref, appcfg}) -> appcfg[:appcfg][:name] === appref_or_name end
-        IO.inspect apps
         case rest do
           [appref_and_appcfg] ->
             {:reply, {:ok, appref_and_appcfg}, state}
@@ -164,7 +162,7 @@ defmodule Spew.Appliance.Manager do
         {:reply, {:error, :not_found}, state}
 
       opts ->
-        state = %{state | :appliances => Dict.put(apps, appref, Dict.put(apps[appref], k, v))}
+        state = %{state | :appliances => Dict.put(apps, appref, Dict.put(opts, k, v))}
         {:reply, :ok, state}
     end
   end
@@ -185,7 +183,7 @@ defmodule Spew.Appliance.Manager do
   end
 
   # trigger crash/stop events
-  def handle_info({:DOWN, monref, :process, pid, reason} = x ,
+  def handle_info({:DOWN, monref, :process, pid, reason},
                   state = %Self{apprefs: apprefs, appliances: apps}) do
 
     case List.keyfind apprefs, monref, 1 do
@@ -199,14 +197,6 @@ defmodule Spew.Appliance.Manager do
         end
 
         apprefs = List.keydelete apprefs, monref, 1
-
-        apps = case apps[appref][:cfgref] do
-          nil ->
-            spawn_link fn -> __MODULE__.delete appref end
-          _ ->
-            apps
-        end
-
 
         {:noreply, %{state | :apprefs => apprefs, :appliances => apps}}
 
@@ -273,9 +263,6 @@ defmodule Spew.Appliance.Manager do
     {:noreply, %{state | :await => waitfor}}
   end
 
-  defp stopstate(:normal), do: :stopped
-  defp stopstate(reason), do: {:crashed, reason}
-
   defp supervisor_action(appref, {:crash, _} = ev, %{crash: :restart}, state) do
     restart appref, :crashed, ev, state
   end
@@ -296,7 +283,7 @@ defmodule Spew.Appliance.Manager do
     spawn fn ->
       # maybe update monitor
       case app[:handler].run app[:appcfg], app[:runopts] do
-        {:ok, state} ->
+        {:ok, _state} ->
           nil
 
         {:ok, runstate, monitor} ->

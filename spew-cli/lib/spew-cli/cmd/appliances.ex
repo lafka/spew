@@ -1,13 +1,16 @@
 defmodule SpewCLI.Cmd.Appliances do
 
   @manager {:global, Spew.Appliance.Manager}
+  @config {:global, Spew.Appliance.Config.Server}
 
   def run(args) do
     SpewCLI.maybe_start_network
 
+    IO.puts "=> Appliance Instances"
+
     {:ok, list} = GenServer.call @manager, :list
     for {appref, appcfg} <- list do
-      IO.puts "#{appcfg[:appcfg][:name]} (#{appref})"
+      IO.puts "=> #{appcfg[:appcfg][:name]} (#{appref})"
       IO.puts "\thandler:  #{appcfg[:appcfg][:handler]}"
       IO.puts "\tstate:    #{inspect appcfg[:state]}"
       IO.puts "\trestart?: #{inspect appcfg[:appcfg][:restart]}"
@@ -16,6 +19,22 @@ defmodule SpewCLI.Cmd.Appliances do
       IO.puts "\tapploop:  #{inspect appcfg[:apploop]} at #{node appcfg[:apploop]} (alive?: #{alive? appcfg[:apploop]})"
       IO.puts "\tcommand:  #{List.flatten([appcfg[:appcfg][:runneropts][:command]]) |> Enum.join(" ")}"
       IO.puts "\n"
+    end
+
+    IO.write "\n"
+
+    IO.puts "=> Appliance Configurations"
+
+    {:ok, list} = GenServer.call @config, :fetch
+
+    for {appref, appcfg} <- list do
+      appcfg = Map.delete appcfg, :__struct__
+      cmd = case appcfg[:runneropts][:command] do
+        nil -> "(init)"
+        cmd -> List.flatten([cmd]) |> Enum.join(" ")
+      end
+
+      IO.puts "- #{appcfg[:name]} (#{appcfg[:type]}):  #{cmd}"
     end
   end
 

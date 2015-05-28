@@ -5,7 +5,7 @@ defmodule ConfigTest do
   alias Spew.Appliance.Config.Item
 
   setup do
-    Application.put_env :spew, :appliance, config: "test/config/appliances.config"
+    Application.put_env :spew, :appliance, config: ["test/config/appliances.config"]
     :ok = Config.unload :all
   end
 
@@ -32,7 +32,7 @@ defmodule ConfigTest do
     assert :ok = Config.load "test/config/config-test-appliances.config"
     {:ok, [file, file2]} = Config.files
     :ok = Config.unload file
-    assert {:ok, [file2]} = Config.files
+    assert {:ok, [file2]} == Config.files
   end
 
   test "config reload rewrites old entries" do
@@ -45,9 +45,9 @@ defmodule ConfigTest do
     assert newbeast !== beast
   end
 
-  test "config reload keeps config for running appliances" do
-      assert true
-  end
+  #test "config reload keeps config for running appliances" do
+  #    assert true
+  #end
 
   test "transient config" do
     {:ok, cfgref} = Config.store %Item{name: "test", type: :shell, appliance: ["/bin/bash", []]}
@@ -64,6 +64,34 @@ defmodule ConfigTest do
     assert :ok = Config.load "test/config/parser.config",
                              parser: Spew.Appliance.ConfigParser
 
-    IO.inspect Config.fetch
+    {:ok, cfg} = Config.fetch
+
+    assert nil !== cfg["tcp-local"]
+    assert nil !== cfg["redis-local"]
+    assert nil !== cfg["riak-local"]
+
+    assert ["debian", %{"tag" => "jessie-dev", "type" => "spew"}] = cfg["tcp-local"][:appliance]
+    assert "tcp" == cfg["tcp-local"][:service]
+    assert :systemd == cfg["tcp-local"][:type]
+    assert ["/cloud/tcp:/app:ro", "/share:/share:ro"] == cfg["tcp-local"][:runneropts][:mount]
+    assert ["/tmp", "/tmp2"] == cfg["tcp-local"][:runneropts][:tmpfs]
+    assert "cd /app/; iex --name " <> _ = Enum.join(cfg["tcp-local"][:runneropts][:command], " ")
+    assert [service: "riak", service: "redis"] = cfg["tcp-local"][:depends]
+    assert [:crash] == cfg["tcp-local"][:restart]
+  end
+
+  test "nested" do
+    Config.unload :all
+    assert :ok = Config.load "test/config/nested.config",
+                             parser: Spew.Appliance.ConfigParser
+
+    {:ok, cfg} = Config.fetch
+
+    assert nil !== cfg["base-service"]
+    assert nil !== cfg["restart-service"]
+
+    assert cfg["base-service"][:restart] == false
+    assert cfg["restart-service"][:restart] == [:crash]
+    assert cfg["restart-service"][:cfgrefs] == {"restart-service", ["base-service"]}
   end
 end

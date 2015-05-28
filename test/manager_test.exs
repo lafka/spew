@@ -15,9 +15,10 @@ defmodule ManagerTest do
   end
 
   test "await" do
-    Process.send_after :procmanager, {:event, "a", {:a, 1}}, 100
+    p = :global.whereis_name Manager
+    Process.send_after p, {:event, "a", {:a, 1}}, 100
     assert {:ok, {:a, 1}} = Manager.await "a", &match?({:a, _}, &1), 1000
-    send :procmanager, {:event, "a", {:a, 1}}
+    send p, {:event, "a", {:a, 1}}
     assert {:error, :timeout} = Manager.await "a", &match?({:a, _}, &1), 1000
   end
 end

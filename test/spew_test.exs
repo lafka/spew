@@ -12,6 +12,8 @@ defmodule SpewTest do
   end
 
   test "only existing appliances can run" do
+    # test name is suggestive, you can run non-existing appliances
+    # BUT they must be explicitly set as transient
     {:error, {:not_found, "this-stuff"}} = Appliance.run "this-stuff", %Config.Item{
         type: :shell,
         appliance: ["/bin/ls", []],
@@ -20,27 +22,27 @@ defmodule SpewTest do
   end
 
   test "run transient appliance" do
-    {:ok, cfgref} = Appliance.create "void", %Config.Item{
+    cfg = %{
       name: "void",
       type: :void
     }
 
-    {:ok, appref}               = Appliance.run cfgref
+    {:ok, appref}               = Appliance.run nil, cfg
     assert {:ok, {_, :alive}}   = Appliance.status appref
     :ok                         = Appliance.stop appref, keep: true
     assert {:ok, {_, :stopped}} = Appliance.status appref
   end
 
   test "status" do
-    {:ok, cfgref} = Appliance.create "void", %Config.Item{
+    cfg = %{
       name: "void",
       type: :void
     }
 
-    {:ok, appref1} = Appliance.run cfgref
-    {:ok, appref2} = Appliance.run cfgref
-    {:ok, appref3} = Appliance.run cfgref
-    {:ok, appref4} = Appliance.run cfgref
+    {:ok, appref1} = Appliance.run nil, cfg
+    {:ok, appref2} = Appliance.run nil, cfg
+    {:ok, appref3} = Appliance.run nil, cfg
+    {:ok, appref4} = Appliance.run nil, cfg
 
     {:ok, statuses} = Appliance.status
     for {k, {_, status}} <- statuses do
