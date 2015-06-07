@@ -1,6 +1,8 @@
 defmodule ShellApplianceTest do
   use ExUnit.Case
 
+  require Logger
+
   alias Spew.Appliance
   alias Spew.Appliance.Manager
   alias Spew.Appliance.Config
@@ -19,8 +21,8 @@ defmodule ShellApplianceTest do
     {:ok, {appref, _appstate}} = Manager.get(appref)
 
     assert {:ok, {_, :alive}} = Appliance.status appref
-    assert_receive {:log, ^appref, {:stdout, "hello\n"}}, 100
-    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 2000
+    assert_receive {:log, ^appref, {:stdout, "hello\n"}}, 1000
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 5000
 
     assert {:ok, {_, :stopped}} = Appliance.status appref
     :ok = Appliance.delete appref
@@ -34,12 +36,13 @@ defmodule ShellApplianceTest do
 
     assert Process.alive? pid
 
-    spawn fn ->
-      :timer.sleep 10;
-      :ok = Appliance.stop appref
+    Process.flag :trap_exit, true
+    pid = spawn fn ->
+      :timer.sleep 10 # wait for manager to register event handler
+      :ok = Appliance.stop appref, keep?: false
     end
 
-    assert_receive {:ev, appref, :stop}
+    {:ok, :stop} = Manager.await appref, &match?(:stop, &1), 5000
 
     # Ensure it's removed from the manager when stop is called
     assert {:error, :not_found} = Manager.get appref

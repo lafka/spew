@@ -195,10 +195,26 @@ defmodule SystemdTest do
   end
 
   test "spew-build archive" do
+    # test "latest" tag
     {:ok, appref} = Appliance.run nil, %{
       name: "test-spew-build-archive",
       type: :systemd,
-      appliance: ["dummy", %{type: :spew, tag: "0.0.3", busybox: true}]
+      appliance: ["dummy", %{type: "spew", busybox: true}],
+      runneropts: [
+        command: ["/bin/busybox sh -c read line"]
+      ]
+    }
+
+    assert :ok = Appliance.stop appref
+
+    # test specific tag
+    {:ok, appref} = Appliance.run nil, %{
+      name: "test-spew-build-archive",
+      type: :systemd,
+      appliance: ["dummy", %{type: "spew", tag: "0.0.3", busybox: true}],
+      runneropts: [
+        command: ["/bin/busybox sh -c read line"]
+      ]
     }
 
     assert :ok = Appliance.stop appref

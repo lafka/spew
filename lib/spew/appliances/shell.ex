@@ -18,20 +18,9 @@ defmodule Spew.Appliances.Shell do
     if ! File.exists?(file) or 0 === (File.stat!(file).mode &&& 0o111) do
       {:error, {:missing_runtime, file}}
     else
-      # @todo implement restart functionality
-      # first version has simple semantics, either restart or don't.
-      # restart sleep interval can be specified by # opts[:restart_wait_time]
-      # second iteration should support restart frequencies and
-      # specfications pr. exit status
-      #opts = case appopts[:restart] do
-      #  :true -> opts
-      #  :on_exit -> opts
-      #  :false -> opts
-      #end
-
       opts = [:stdin, {:stdout, self}, :monitor, {:stderr, self}]
 
-      Logger.debug "exec: #{cmd}"
+      Logger.debug "exec/shell: #{cmd}"
 
       {:ok, pid, extpid} = :exec.run_link cmd, opts
 
@@ -46,15 +35,24 @@ defmodule Spew.Appliances.Shell do
 
   def stop(appcfg, opts \\ []) do
     kill? = opts[:kill?]
+    wait = opts[:wait]
+
+
     case appcfg[:runstate][:pid] do
       nil ->
         {:error, {:argument_error, :no_pid}}
 
       pid when kill? ->
-        :exec.kill(pid)
+        Logger.debug "exec/shell: sending SIGTERM to #{inspect pid} (ext: #{appcfg[:runstate][:extpid]})"
+        :ok = :exec.kill pid, 15
+
+      pid when wait ->
+        Logger.debug "exec/shell: stopping #{inspect pid} (ext: #{appcfg[:runstate][:extpid]}) w/wait #{wait}"
+        :ok = :exec.stop_and_wait pid, wait
 
       pid ->
-        :exec.stop(pid)
+        Logger.debug "exec/shell: stopping #{inspect pid} (ext: #{appcfg[:runstate][:extpid]})"
+        :ok = :exec.stop pid
     end
   end
 

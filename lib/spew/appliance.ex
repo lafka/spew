@@ -94,7 +94,7 @@ defmodule Spew.Appliance do
           {:DOWN, _ref, :process, ^pid, res} ->
             {:error, res}
         after
-          5000 ->
+          60000 ->
             Process.exit pid, :kill
             {:error, :timeout}
         end
@@ -102,7 +102,7 @@ defmodule Spew.Appliance do
   end
 
 
-  defp maybe_unpack(%{appliance: [spewtarget, %{type: :spew, tag: tag} = bopts]} = appcfg, opts) do
+  defp maybe_unpack(%{appliance: [spewtarget, %{type: "spew", tag: tag} = bopts]} = appcfg, opts) do
     {:ok, target} = maybe_unpack2 spewtarget <> "/" <> tag, appcfg, opts
 
     case bopts[:busybox] do
@@ -113,7 +113,7 @@ defmodule Spew.Appliance do
         [root: {:chroot, target}]
     end
   end
-  defp maybe_unpack(%{appliance: [spewtarget, %{type: :spew} = bopts]} = appcfg, opts) do
+  defp maybe_unpack(%{appliance: [spewtarget, %{type: "spew"} = bopts]} = appcfg, opts) do
     {:ok, target} = maybe_unpack2 spewtarget, appcfg, opts
 
     case bopts[:busybox] do
@@ -250,9 +250,10 @@ defmodule Spew.Appliance do
   def stop(appref, opts \\ []) do
     case Manager.get appref do
       {:ok, {appref, appcfg}} ->
-        :ok = appcfg[:handler].stop appcfg
+        :ok = appcfg[:handler].stop appcfg, opts
 
-        if nil !== opts[:keep] and true !== opts[:keep] do
+        if nil !== opts[:keep?] and true !== opts[:keep?] do
+          Logger.debug "appliance: removing #{appref} from manager"
           :ok = Manager.delete appref
         end
 

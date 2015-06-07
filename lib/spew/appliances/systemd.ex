@@ -180,7 +180,24 @@ defmodule Spew.Appliances.Systemd do
   end
 
   def stop(appcfg, opts \\ []) do
-    Spew.Appliances.Shell.stop appcfg, opts
+    # nspawn is ran with sudo and erlexec can't handle it!
+    t = if opts[:kill?] do
+      Task.async fn ->
+        :exec.run 'sudo machinectl kill #{appcfg.appcfg.name}', [:stdout, :stderr, :sync]
+      end
+    else
+      Task.async fn ->
+        :exec.run 'sudo machinectl poweroff #{appcfg.appcfg.name}', [:stdout, :stderr, :sync]
+      end
+    end
+
+    case Task.await t do
+      {:ok, _res} ->
+        :ok
+
+      {:error, [exit_status: 256, stderr: ["Could not kill machine: Access denied\n"]]} ->
+        {:error, :eperm}
+    end
   end
 
   def status(appstate) do

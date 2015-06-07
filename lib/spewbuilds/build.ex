@@ -8,10 +8,19 @@ defmodule SpewBuild.Build do
 
   def find(buildspec) do
     buildsdir = System.get_env("SPEW_BUILDS") || "~/.spew/builds"
-    {parts, _} = (String.split(buildspec, "/") ++ ["*", "*", "*.tar.gz"]) |> Enum.split(5)
-    path = Path.join [buildsdir | parts]
 
-    IO.inspect path |> Path.expand
+    buildspec2 = case String.split(buildspec, "/") do
+      [target] ->
+        # find "latest" tag
+        [tag | _] = File.ls! Path.join(buildsdir, target) |> Path.expand
+        [target, tag]
+
+      [_target | _] = spec ->
+        spec
+    end
+
+    {parts, _} = (buildspec2 ++ ["*", "*", "*.tar.gz"]) |> Enum.split(5)
+    path = Path.join [buildsdir | parts]
 
     case path |> Path.expand |> Path.wildcard do
       [] ->

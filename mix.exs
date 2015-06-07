@@ -14,7 +14,9 @@ defmodule Spew.Mixfile do
       mod: {Spew, []},
       applications: [
         :logger,
-        :exec
+        :exec,
+        :cowboy,
+        :plug
       ]
     ]
   end
@@ -22,7 +24,10 @@ defmodule Spew.Mixfile do
   defp deps do
     [
       {:exrm, "== 0.15.3"},
-      {:exec, github: "saleyn/erlexec"}
+      {:exec, github: "saleyn/erlexec"},
+      {:cowboy, "~> 1.0.0"},
+      {:plug, "~> 0.12"},
+      {:poison, "~> 1.4.0"}
     ]
   end
 end

@@ -95,7 +95,7 @@ defmodule Spew.Appliance.ConfigParser do
   defp line([app, "target"], target, acc, _cfgacc) do
     {targetapp, targetappopts} = case String.split(target, "#") do
       [targetapp] ->
-        {String.strip(targetapp), [type: :spew]}
+        {String.strip(targetapp), %{type: "spew"}}
 
       [targetapp, targetappopts] ->
         targetappopts = pair String.split(targetappopts, [":", " ", "\t", ","], trim: true)
@@ -140,5 +140,5 @@ defmodule Spew.Appliance.ConfigParser do
 
   defp pair(pairs), do: pair(pairs, %{})
   defp pair([], acc), do: acc
-  defp pair([k, v | rest], acc), do: pair(rest, Dict.put(acc, k, v))
+  defp pair([k, v | rest], acc), do: pair(rest, Dict.put(acc, String.to_atom(k), v))
 end

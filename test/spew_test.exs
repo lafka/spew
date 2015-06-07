@@ -29,7 +29,7 @@ defmodule SpewTest do
 
     {:ok, appref}               = Appliance.run nil, cfg
     assert {:ok, {_, :alive}}   = Appliance.status appref
-    :ok                         = Appliance.stop appref, keep: true
+    :ok                         = Appliance.stop appref, keep?: true
     assert {:ok, {_, :stopped}} = Appliance.status appref
   end
 
@@ -50,8 +50,8 @@ defmodule SpewTest do
     end
 
 
-    :ok = Appliance.stop appref2, keep: true
-    :ok = Appliance.stop appref4, keep: true
+    :ok = Appliance.stop appref2, keep?: true
+    :ok = Appliance.stop appref4, keep?: true
 
     {:ok, statuses} = Appliance.status
 

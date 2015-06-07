@@ -70,7 +70,7 @@ defmodule ConfigTest do
     assert nil !== cfg["redis-local"]
     assert nil !== cfg["riak-local"]
 
-    assert ["debian", %{"tag" => "jessie-dev", "type" => "spew"}] = cfg["tcp-local"][:appliance]
+    assert ["debian", %{:tag => "jessie-dev", :type => "spew"}] = cfg["tcp-local"][:appliance]
     assert "tcp" == cfg["tcp-local"][:service]
     assert :systemd == cfg["tcp-local"][:type]
     assert ["/cloud/tcp:/app:ro", "/share:/share:ro"] == cfg["tcp-local"][:runneropts][:mount]

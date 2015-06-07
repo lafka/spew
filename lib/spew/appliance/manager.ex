@@ -5,6 +5,8 @@ defmodule Spew.Appliance.Manager do
 
   alias __MODULE__, as: Self
 
+  alias Spew.Discovery
+
   defmodule Supervision do
   end
 
@@ -92,6 +94,9 @@ defmodule Spew.Appliance.Manager do
 
     send self, {:event, appref, {:start, 0}}
 
+    :ok = Discovery.add appref, %{state: "waiting"}
+
+
     # we can't rely on the caller giving a pid to monitor in it's
     # opts. Therefore we store possible monitors in a searchable record
     if is_pid(monitor) do
@@ -112,6 +117,9 @@ defmodule Spew.Appliance.Manager do
     Logger.debug "manager: removing app #{appref}"
     apps = Dict.delete apps, appref
     sup = Dict.delete sup, appref
+
+    :ok = Discovery.delete appref
+
     {:reply, :ok, %{state | :appliances => apps, :supervision => sup}}
   end
 
@@ -162,6 +170,8 @@ defmodule Spew.Appliance.Manager do
         {:reply, {:error, :not_found}, state}
 
       opts ->
+        # @todo - update discovery
+
         state = %{state | :appliances => Dict.put(apps, appref, Dict.put(opts, k, v))}
         {:reply, :ok, state}
     end

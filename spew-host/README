@@ -1,0 +1,5 @@
+# Instlal stuf
+
+```
+sudo pacman -S dhcp
+```
