@@ -107,8 +107,9 @@ defmodule Spew.Appliances.Systemd do
     end
   end
 
-  defp build_cmd([{:tmpfs, target} | rest], opts, acc, cont) do
-    build_cmd rest, opts, ["--tmpfs", target | acc], cont
+  defp build_cmd([{:tmpfs, targets} | rest], opts, acc, cont) do
+    targets = for t <- targets, do: "--tmpfs " <> t
+    build_cmd rest, opts, targets ++ acc, cont
   end
 
   defp build_cmd([{:mount, mounts} | rest], appcfg, acc, cont) do
