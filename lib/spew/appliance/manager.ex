@@ -202,6 +202,9 @@ defmodule Spew.Appliance.Manager do
           :normal ->
             send self, {:event, appref, :stop}
 
+          {:owner_died, :normal} ->
+            send self, {:event, appref, :stop}
+
           reason ->
             send self, {:event, appref, {:crash, reason}}
         end
