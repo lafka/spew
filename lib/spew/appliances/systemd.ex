@@ -179,6 +179,13 @@ defmodule Spew.Appliances.Systemd do
       {:error, {:no_such_iface, "no such iface: #{iface}, refusing to start container"}}
     end
   end
+  defp build_net_cmd(["" <> buf | r], rest, acc) do
+    part = case String.split buf, ":" do
+      [k, v] -> {String.to_existing_atom(k), v}
+      [buf] ->  String.to_existing_atom(buf)
+    end
+    build_net_cmd [part | r], rest, acc
+  end
 
   def stop(appcfg, opts \\ []) do
     # nspawn is ran with sudo and erlexec can't handle it!
