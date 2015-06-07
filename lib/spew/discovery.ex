@@ -38,6 +38,7 @@ defmodule Spew.Discovery do
 
     defmodule Item do
       defstruct state: "invalid",
+                exit_status: nil,
                 appref: nil,
                 tags: []
     end

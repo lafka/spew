@@ -200,12 +200,16 @@ defmodule Spew.Appliance.Manager do
       {^pid, ^monref, appref} ->
         case reason do
           :normal ->
+            {:ok, _} = Discovery.update appref, %{state: "stopped"}
             send self, {:event, appref, :stop}
 
           {:owner_died, :normal} ->
+            {:ok, _} = Discovery.update appref, %{state: "stopped"}
             send self, {:event, appref, :stop}
 
           reason ->
+            {:ok, _} = Discovery.update appref, %{state: "crashed",
+                                             exit_status: reason}
             send self, {:event, appref, {:crash, reason}}
         end
 
