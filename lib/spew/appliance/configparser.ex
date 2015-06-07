@@ -110,6 +110,10 @@ defmodule Spew.Appliance.ConfigParser do
     Map.put acc, app, Map.put(acc[app], :service, service)
   end
 
+  defp line([app, "appliance"], appliance, acc, _cfgacc) do
+    Map.put acc, app, Map.put(acc[app], :appliance, [appliance, []])
+  end
+
   defp line([app, "restart"], strategy, acc, _cfgacc) do
     strategy = Enum.map(String.split(strategy, " "), &(String.to_atom(&1)))
     Map.put acc, app, Map.put(acc[app], :restart, strategy)
@@ -117,6 +121,9 @@ defmodule Spew.Appliance.ConfigParser do
 
   defp line([app, "$", k], v, acc, _cfgacc) do
     insert_at([app, :runneropts, String.to_atom(k)], String.split(v), acc)
+  end
+  defp line([app, "runneropts"], v, acc, _cfgacc) do
+    insert_at([app, :runneropts], String.split(v), acc)
   end
 
   defp line([app | key], v, _acc, _cfgacc) do
