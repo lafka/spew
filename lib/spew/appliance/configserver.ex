@@ -231,7 +231,10 @@ defmodule Spew.Appliance.Config.Server do
   end
 
   defp gen_ref(%Item{} = vals) do
-    :crypto.hash(:sha256, :erlang.term_to_binary(vals)) |> Base.encode64
+    :crypto.hash(:sha256, :erlang.term_to_binary(vals))
+      |> Base.encode16
+      |> String.downcase
+      |> String.slice 0, 10
   end
 end
 

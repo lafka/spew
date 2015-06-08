@@ -64,7 +64,7 @@ defmodule Spew.Appliance.Manager do
                                 supervision: sups
                                 }) do
 
-    appref = gen_ref
+    appref = appcfg[:appref] || gen_ref
     runstate = %{
       appref: appref,
       handler: appcfg[:handler],
@@ -330,8 +330,10 @@ defmodule Spew.Appliance.Manager do
   end
 
 
-  defp gen_ref(term \\ make_ref) do
+  def gen_ref(term \\ make_ref) do
     :crypto.hash(:sha256, :erlang.term_to_binary(term))
-      |> Base.encode64
+      |> Base.encode16
+      |> String.downcase
+      |> String.slice 0, 10
   end
 end
