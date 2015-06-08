@@ -5,7 +5,8 @@ defmodule ConfigTest do
   alias Spew.Appliance.Config.Item
 
   setup do
-    Application.put_env :spew, :appliance, config: ["test/config/appliances.config"]
+    cfg = Application.get_env(:spew, :appliance)
+    Application.put_env :spew, :appliance, Dict.put(cfg, :config, ["test/config/appliances.config"])
     :ok = Config.unload :all
   end
 
