@@ -15,7 +15,7 @@ defmodule DiscoveryTests do
     test "manager integration" do
       {parent, pref} = {self, make_ref}
       t = Task.async fn ->
-        {:ok, ref} = Discovery.subscribe []
+        {:ok, ref} = Discovery.subscribe true
         send parent, {pref, :ok}
         a = receive do x -> x after 1000 -> {:error, :timeout} end
         b = receive do x -> x after 1000 -> {:error, :timeout} end
@@ -28,9 +28,9 @@ defmodule DiscoveryTests do
       {:ok, appref} = Appliance.run nil, %{name: "void", type: :void}
       :ok = Appliance.stop appref, keep?: false
 
-      {ref, [{:add, ^appref, %{}},
-             {:delete, ^appref, %{}},
-             {:error, :timeout}]} = Task.await t
+      {_subref, [{:add, ^appref, %{}},
+               {:delete, ^appref, %{}},
+               {:error, :timeout}]} = Task.await t
     end
   end
 
@@ -155,9 +155,7 @@ defmodule DiscoveryTests do
       req = conn(method, uri, encode(body))
         |> put_req_header("content-type", "application/json")
 
-      t = Task.async fn ->
-        HTTP.call req, @opts
-      end
+      req = HTTP.call req, @opts
 
       if "" !== req.resp_body do
         Map.put req, :resp_body, decode(req.resp_body)
@@ -240,7 +238,7 @@ defmodule DiscoveryTests do
       {ref, {:add, ^appref, appstate}} = Task.await t
 
       # Process died, ensure subscription is removed
-      assert {:error, {:not_found, ref}} = Discovery.unsubscribe ref
+      assert {:error, {:not_found, ^ref}} = Discovery.unsubscribe ref
 
 
       :ok = Discovery.flush
@@ -267,7 +265,7 @@ defmodule DiscoveryTests do
         {:add, ^appref, appstate},
         {:update, ^appref, appstate, newappstate},
         {:delete, ^appref, newappstate},
-        {:error, :timeout}] = IO.inspect Task.await t
+        {:error, :timeout}] = Task.await t
     end
 
     # test subscribing with more advanced "queries"
@@ -292,7 +290,7 @@ defmodule DiscoveryTests do
       {:ok, _} = Discovery.update appref, %{state: "running"}
       {:ok, _} = Discovery.update appref, %{state: "stopped"}
 
-      {ref, [{:update, ^appref, _old, %{state: "running"}},
+      {_ref, [{:update, ^appref, _old, %{state: "running"}},
              {:update, ^appref, %{state: "running"}, %{state: "stopped"}}]} = Task.await t
 
       Discovery.flush
@@ -314,7 +312,7 @@ defmodule DiscoveryTests do
       {:ok, _} = Discovery.update appref, %{tags: ["c"]}
       {:ok, _} = Discovery.update appref, %{tags: ["c", "a"]}
 
-      {ref, [{:add, ^appref, %{tags: ["a", "b"]}},
+      {_ref, [{:add, ^appref, %{tags: ["a", "b"]}},
              {:update, ^appref, %{tags: ["a", "b"]}, %{tags: ["c"]}}, # repeated
              {:update, ^appref, %{tags: ["c"]}, %{tags: ["c", "a"]}},
              {:error, :timeout}]} = Task.await t

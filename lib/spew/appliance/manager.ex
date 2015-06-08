@@ -94,8 +94,6 @@ defmodule Spew.Appliance.Manager do
 
     send self, {:event, appref, {:start, 0}}
 
-    :ok = Discovery.add appref, %{state: "waiting"}
-
 
     # we can't rely on the caller giving a pid to monitor in it's
     # opts. Therefore we store possible monitors in a searchable record
@@ -118,7 +116,7 @@ defmodule Spew.Appliance.Manager do
     apps = Dict.delete apps, appref
     sup = Dict.delete sup, appref
 
-    :ok = Discovery.delete appref
+    _ = Discovery.delete appref
 
     {:reply, :ok, %{state | :appliances => apps, :supervision => sup}}
   end
@@ -200,15 +198,18 @@ defmodule Spew.Appliance.Manager do
       {^pid, ^monref, appref} ->
         case reason do
           :normal ->
-            {:ok, _} = Discovery.update appref, %{state: "stopped"}
+            # might return {:error, {:not_found, _}}
+            _  = Discovery.update appref, %{state: "stopped"}
             send self, {:event, appref, :stop}
 
           {:owner_died, :normal} ->
-            {:ok, _} = Discovery.update appref, %{state: "stopped"}
+            # might return {:error, {:not_found, _}}
+            _ = Discovery.update appref, %{state: "stopped"}
             send self, {:event, appref, :stop}
 
           reason ->
-            {:ok, _} = Discovery.update appref, %{state: "crashed",
+            # might return {:error, {:not_found, _}}
+            _  = Discovery.update appref, %{state: "crashed",
                                              exit_status: reason}
             send self, {:event, appref, {:crash, reason}}
         end

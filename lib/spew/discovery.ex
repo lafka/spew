@@ -190,23 +190,26 @@ defmodule Spew.Discovery do
         ({k, %{target: target, match: spec}}, acc) when is_binary(spec) ->
           skip?  = Enum.member? ignore, k
 
-          if spec === appstate.appref and ! skip? do
-            send target, ev
-            [k|acc]
-          else
-            acc
-          end
+          matches? = spec === appstate.appref and ! skip?
+          publish2 matches?, target, ev, k, acc
+
+        ({k, %{target: target, match: true = matches?}}, acc) ->
+          skip?  = Enum.member? ignore, k
+          matches? = matches? and ! skip?
+          publish2 matches?, target, ev, k, acc
+
         ({k, %{target: target, match: spec}}, acc) ->
           skip?  = Enum.member? ignore, k
 
-          if [] !== query_validate(spec, appstate, []) and ! skip? do
-            send target, ev
-            [k|acc]
-          else
-            acc
-          end
+          matches? = [] !== query_validate(spec, appstate, []) and ! skip?
+          publish2 matches?, target, ev, k, acc
       end
     end
+    defp publish2(true, target, ev, k, acc) do
+        send target, ev
+        [k | acc]
+    end
+    defp publish2(false, _target, _ev, _k, acc), do: acc
   end
 end
 

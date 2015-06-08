@@ -2,8 +2,11 @@ defmodule Spew.Appliance do
 
   require Logger
 
+  alias Spew.Discovery
+
   alias Spew.Appliance.Config
   alias Spew.Appliance.Manager
+  alias Spew.Appliance.Log
 
   @doc """
   Creates a appliance
@@ -49,6 +52,10 @@ defmodule Spew.Appliance do
           runneropts = Dict.merge appopts[:runneropts] || [], maybe_unpack(appopts, opts)
           appopts = Dict.put appopts, :runneropts, runneropts
 
+          appref = Manager.gen_ref
+          appopts = Dict.put appopts, :appref, appref
+
+          Discovery.add appref, %{state: "waiting"}
           case module.run appopts, opts do
             {:ok, state} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state)
