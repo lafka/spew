@@ -1,5 +1,5 @@
 defmodule SystemdTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias Spew.Appliance
   alias Spew.Appliance.Config

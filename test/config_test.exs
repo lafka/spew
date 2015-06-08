@@ -1,5 +1,5 @@
 defmodule ConfigTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias Spew.Appliance.Config
   alias Spew.Appliance.Config.Item

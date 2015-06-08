@@ -1,5 +1,5 @@
 defmodule SupervisionTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
 
   alias Spew.Appliance.Manager
   alias Spew.Appliance.Config

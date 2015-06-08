@@ -3,7 +3,7 @@ defmodule DiscoveryTests do
   defmodule DiscoveryIntegrationTest do
     # Test that running/stopping appliances actually generates events
 
-    use ExUnit.Case
+    use ExUnit.Case, async: false
 
     alias Spew.Discovery
     alias Spew.Appliance
@@ -35,7 +35,7 @@ defmodule DiscoveryTests do
   end
 
   defmodule DiscoveryHTTPAPITest do
-    use ExUnit.Case
+    use ExUnit.Case, async: false
     use Plug.Test
 
     alias Spew.Discovery.HTTP
@@ -169,7 +169,7 @@ defmodule DiscoveryTests do
   end
 
   defmodule DiscoveryErlAPITest do
-    use ExUnit.Case
+    use ExUnit.Case, async: false
 
     alias Spew.Discovery
 
