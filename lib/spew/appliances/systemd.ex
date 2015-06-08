@@ -34,6 +34,7 @@ defmodule Spew.Appliances.Systemd do
     case build_cmd Enum.into(runneropts, []), appopts do
       {:ok, cmd, cont} ->
         bin = System.find_executable "systemd-nspawn"
+        cmd = fill_env appopts, cmd
         shellopts = %{appopts | :runneropts => cmd,
                                 :appliance => [bin, appopts]}
 
@@ -44,6 +45,25 @@ defmodule Spew.Appliances.Systemd do
       {:error, _e} = err ->
         err
     end
+  end
+
+  defp fill_env(appopts, cmd) do
+    [exec | rest]  = Enum.reverse cmd
+    rest = ["--setenv SPEWHOST=#{spewtarget}", "--setenv APPREF=#{appopts[:appref]}" | rest]
+    Enum.reverse [exec | rest]
+  end
+
+  defp spewtarget do
+    opts = Application.get_env(:spew, :discovery)
+    ip = (opts[:opts][:ip] || {127, 0, 0, 1}) |> Tuple.to_list |> Enum.join "."
+    port = case {opts[:schema], opts[:opts][:port]} do
+      {:https, nil} -> 443
+      {:http, nil} -> 80
+      {_schema, port} -> port
+    end
+
+    appref = "appref-subscribe"
+    "#{opts[:schema] || "http"}://#{ip}:#{port}/"
   end
 
   defp build_cmd(vals, opts), do: build_cmd(vals, opts, [], [])
