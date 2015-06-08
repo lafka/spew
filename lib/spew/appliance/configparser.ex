@@ -27,7 +27,7 @@ defmodule Spew.Appliance.ConfigParser do
         [app | _] = keyparts = String.split k, "."
 
         cfgacc = Dict.put_new cfgacc, app, %Item{name: app}
-        cfgacc = line keyparts, String.strip(v), cfgacc
+        cfgacc = line keyparts, String.strip(v), cfgacc, cfgacc
         {cfgacc, appacc}
 
       # this is the instance config
