@@ -24,14 +24,14 @@ defmodule Spew.Appliances.Void do
       send parent, {ref, Manager.await(appcfg[:appref], &(&1 == :stop))}
     end
     receive do {^ref, :sync} -> :ok
-    after 1000 -> throw :timeout
+    after 2000 -> throw :timeout
     end
 
     p = :global.whereis_name Manager
     send p, {:event, appcfg[:appref], :stop}
 
     receive do {^ref, {:ok, :stop}} -> :ok
-    after 1000 -> {:error, :timeout} end
+    after 2000 -> {:error, :timeout} end
   end
 
   def status(appcfg) do
