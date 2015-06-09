@@ -31,7 +31,7 @@ defmodule Spew.Appliances.Void do
     send p, {:event, appcfg[:appref], :stop}
 
     receive do {^ref, {:ok, :stop}} -> :ok
-    after 2000 -> {:error, :timeout} end
+    after 10000 -> {:error, :timeout} end
   end
 
   def status(appcfg) do

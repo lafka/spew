@@ -16,13 +16,18 @@ defmodule Spew.Discovery.HTTP do
     {:ok, body, conn} = read_body conn
     body = decode body
 
-    case Discovery.add body[:appref], body do
-      :ok ->
-        send_resp conn, 201, ""
+    case body[:appref] do
+      nil ->
+        send_resp conn, 400, encode(%{error: "no appref given"})
 
-      err ->
-        IO.inspect err
-        send_resp conn, 400, ""
+      appref ->
+        case Discovery.add body[:appref], body do
+          :ok ->
+            send_resp conn, 201, ""
+
+          err ->
+            send_resp conn, 400, ""
+        end
     end
   end
 
@@ -32,32 +37,109 @@ defmodule Spew.Discovery.HTTP do
   end
 
   get "/appliance/:appspec" do
-    case Discovery.get parseappspec(appspec) do
+    case Discovery.Spec.from_string appspec do
       {:ok, res} ->
+        {:ok, res} = Discovery.get res
         send_resp conn, 200, encode(res)
 
       {:error, err} ->
-        send_resp conn, 400, encode(%{error: err})
+        Logger.debug "failed to parse: #{inspect appspec}"
+        send_resp conn, 400, encode(%{error: inspect err})
     end
   end
 
-  # thhis must atleast iterate a million times over each byte :|
-  defp parseappspec(buf), do: parseappspec(buf, [])
-  defp parseappspec("", acc), do: acc
-  defp parseappspec(buf, acc) do
-    [k, buf] = String.split buf, ":", parts: 2
-    {v, rest} = case String.split buf, ";", parts: 2 do
-      [v] -> {v, ""}
-      [v, rest] -> {v, rest}
-    end
-
-    parseappspec rest, [{String.to_existing_atom(k), parseappspec2(v)} | acc]
-  end
-
-  get "/subscribe/:appspec" do
-    {:ok, ref} = Discovery.subscribe parseappspec appspec
+  get "/subscribe" do
+    {:ok, ref} = Discovery.subscribe true
     conn = send_chunked conn, 200
-    subloop ref, conn
+
+    case subloop ref, conn do
+      {:ok, conn} ->
+        conn
+
+      {:error, conn, err} ->
+        Logger.debug "subscribe/error: #{inspect err}"
+        conn
+    end
+  end
+  get "/subscribe/:appspec" do
+    case Discovery.Spec.from_string appspec do
+      {:ok, appspec} ->
+        {:ok, ref} = Discovery.subscribe appspec
+        conn = send_chunked conn, 200
+
+        case subloop ref, conn do
+          {:ok, conn} ->
+            conn
+
+          {:error, conn, err} ->
+            Logger.debug "subscribe/error: #{inspect err}"
+            conn
+        end
+
+      {:error, err} ->
+        send_resp conn, 400, encode(%{error: inspect err})
+    end
+  end
+
+  get "/await/:appspec" do
+    case Discovery.Spec.from_string appspec do
+      {:ok, appspec} ->
+        sendchunks = fn(chunks, conn) ->
+          Enum.reduce chunks, conn, fn(app, conn) ->
+            Logger.debug "send chunk: #{encode app}"
+            {:ok, conn} = chunk conn, "event: await.appliance\ndata: #{encode app}\n\n"
+            conn
+          end
+        end
+
+        {:ok, ref} = Discovery.subscribe appspec
+        case Discovery.get appspec do
+          {:ok, apps} ->
+
+            {apps, rest} = fulfilled apps, appspec
+            conn = send_chunked conn, 200
+            conn = sendchunks.(apps, conn)
+
+            await rest, conn, sendchunks
+
+          {:error, {:query, err}} ->
+            send_resp conn, 400, encode(%{error: inspect err})
+        end
+
+      {:error, err} ->
+        send_resp conn, 400, encode(%{error: inspect err})
+    end
+  end
+
+  defp await([], conn, _cont), do: conn
+  defp await(specs, conn, cont) do
+    receive do
+      {:add, appref, appstate} ->
+        {apps, rest} = fulfilled [appstate], specs
+        await rest, cont.(apps, conn), cont
+
+      {:update, appref, _oldappstate, appstate} ->
+        {apps, rest} = fulfilled [appstate], specs
+        await rest, cont.(apps, conn), cont
+
+      # @todo should add delete in here to wait for service that are
+      # added than deleted
+    end
+  end
+
+  defp fulfilled(apps, specs) do
+    Enum.reduce apps, {[], specs}, fn(app, {apps, specs}) ->
+      case Discovery.Spec.match? app, specs do
+        [] ->
+          {apps, specs}
+
+        matchedspecs  when is_list(specs) ->
+          rest = Enum.reduce matchedspecs, specs, fn(spec, specs) ->
+            {[app | apps], specs -- [spec]}
+          end
+      end
+    end
+
   end
 
   defp subloop(ref, conn) do
@@ -84,48 +166,11 @@ defmodule Spew.Discovery.HTTP do
     case res do
       {:ok, conn} ->
         subloop ref, conn
-      res ->
-        res
+
+      {:error, err}->
+        {:error, conn, err}
     end
   end
-
-  defp parseappspec2(buf), do: parseappspec2(buf, {"", []})
-
-  defp parseappspec2("", {acc, group}), do:
-    [acc | group]
-
-  defp parseappspec2("," <> rest, {"", group}), do:
-    parseappspec2(rest, {"", group})
-  defp parseappspec2("," <> rest, {k, group}), do:
-    parseappspec2(rest, {"", [k | group]})
-
-  defp parseappspec2("(" <> rest, {"", group}) do
-    {rest, innergroup} = parseappspec2 rest
-    parseappspec2 rest, {"", [innergroup | group]}
-  end
-  defp parseappspec2("(" <> rest, {acc, group}) do
-    {rest, innergroup} = parseappspec2 rest
-    parseappspec2 rest, {"", [innergroup | group]}
-  end
-  defp parseappspec2(")" <> rest, {acc, group}), do:
-    {rest, [acc|group]}
-
-  defp parseappspec2(<<k :: binary-size(1), rest :: binary()>>, {acc, group}), do:
-    parseappspec2(rest, {acc <> k, group})
-
-
-  #defp parseappspec(buf) do
-  #  String.split(buf, ";") |> Enum.reduce, [], fn(part) ->
-  #    [k, v] = String.split part, ":", parts: 2
-  #    parseappspec2 String.split(v, "("), acc
-  #  end
-  #end
-  #defp parseappspec2("", acc), do: acc
-  #defp parseappspec2(buf, group) do
-  #  case String.split buf, ")" do
-  #    [parts] -> String.split 
-  #  end
-  #end
 
   put "/appliance/:appref" do
     {:ok, body, conn} = read_body conn

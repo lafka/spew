@@ -34,6 +34,49 @@ defmodule DiscoveryTests do
     end
   end
 
+
+  defmodule DiscoveryAppSpecParserTest do
+    use ExUnit.Case, async: true
+
+    alias Spew.Discovery.Spec
+    alias Spew.Discovery.Server.Item
+
+    test "from_string" do
+      assert {:ok, [state: "foo"]} = Spec.from_string "state:foo"
+      assert {:ok, [state: ["foo", :or, "bar"]]} = Spec.from_string "state:(foo, bar)"
+      assert {:ok, [state: ["foo", :or, "bar"]]} = Spec.from_string "state:(foo OR bar)"
+      # no difference in list based or scalar based items. Should warn
+      # you about state will never validate true though...
+      assert {:ok, [state: ["foo", :and, "bar"]]} = Spec.from_string "state:(foo AND bar)"
+      assert {:ok, [tags: ["foo", :and, "bar"]]} = Spec.from_string "tags:(foo AND bar)"
+
+      spec = "(state:running AND tags:(production AND riak-2.1.0) AND appliance:riak),"
+          <> "(state:running AND (tags:production AND tags:master), appliance:redis)"
+
+      assert {:ok, [
+        [{:state, "running"}, :and, [{:tags, "production"}, :and, {:tags, "master"}], {:appliance, "redis"}],
+        [{:state, "running"}, :and, {:tags, ["production", :and, "riak-2.1.0"]}, {:appliance, "riak"}]
+      ]} == Spec.from_string spec
+
+      assert {:ok, [tags: ["!a", :and, "b"]]} = Spec.from_string "tags:(!a AND b)"
+    end
+
+    test "match spec" do
+      assert [state: "foo"] == Spec.match? %Item{state: "foo"}, [state: "foo"]
+      assert [state: ["foo", :or, "bar"]] == Spec.match? %Item{state: "foo"}, [state: ["foo", :or, "bar"]]
+      assert [state: ["foo", :or, "bar"]] == Spec.match? %Item{state: "bar"}, [state: ["foo", :or, "bar"]]
+
+      assert [tags: _] = Spec.match? %Item{tags: ["a", "b"]}, [tags: ["a", :or, "c"]]
+      assert [] = Spec.match? %Item{tags: ["a", "b"]}, [tags: ["!a", :and, "b"]]
+      assert [tags: _] = Spec.match? %Item{tags: ["a", "b"]}, [tags: ["a", :and, "b"]]
+
+      assert [] == Spec.match? %Item{state: "foo"}, [{:state, "foo"}, :and, {:appref, "bar"}]
+      assert [{:state, "foo"}, [{:appref, "bar"}, :or, {:appref, "foobar"}]] ==
+        Spec.match? %Item{state: "foo", appref: "foobar"},
+                    [{:state, "foo"}, :and, [{:appref, "bar"}, :or, {:appref, "foobar"}]]
+    end
+  end
+
   defmodule DiscoveryHTTPAPITest do
     use ExUnit.Case, async: false
     use Plug.Test
@@ -101,12 +144,12 @@ defmodule DiscoveryTests do
 
       assert ["query-0", "query-2", "query-3", "query-5"] = qresp run(:get, "/appliance/state:waiting")
       assert ["query-3", "query-4"] = qresp run(:get, "/appliance/tags:b")
-      assert ["query-3"] = qresp run(:get, "/appliance/tags:(!a,b)")
-      assert ["query-4"] = qresp run(:get, "/appliance/tags:(a,b)")
-      assert ["query-0", "query-1", "query-3", "query-4", "query-5"] = qresp run(:get, "/appliance/tags:!a,b")
-      assert ["query-3", "query-5"] = qresp run(:get, "/appliance/tags:c,(!a,b)")
-      assert ["query-4"] = qresp run(:get, "/appliance/tags:b;state:running")
-      assert ["query-3"] = qresp run(:get, "/appliance/tags:b;state:waiting")
+      assert ["query-3"] = qresp run(:get, "/appliance/tags:(!a AND b)")
+      assert ["query-4"] = qresp run(:get, "/appliance/tags:(a AND b)")
+      assert ["query-0", "query-1", "query-3", "query-4", "query-5"] = qresp run(:get, "/appliance/tags:(!a,b)")
+      assert ["query-3", "query-5"] = qresp run(:get, "/appliance/tags:(c,(!a AND b))")
+      assert ["query-4"] = qresp run(:get, "/appliance/(tags:b AND state:running)")
+      assert ["query-3"] = qresp run(:get, "/appliance/(tags:b AND state:waiting)")
     end
 
     test "appref subscribe" do
@@ -176,6 +219,8 @@ defmodule DiscoveryTests do
     end
 
     defp qresp(resp) do
+      assert 200 == resp.status, "#{inspect resp.resp_body}"
+
       for(i <- resp.resp_body, do:
         i.appref) |> Enum.sort
     end
@@ -336,7 +381,7 @@ defmodule DiscoveryTests do
 
       {parent, pref} = {self, make_ref}
       t = Task.async fn ->
-        {:ok, ref} = Discovery.subscribe [tags: ["a", "b", ["c", "a"]]]
+        {:ok, ref} = Discovery.subscribe [tags: [["a", :or, "b"], :or, ["c", :and, "a"]]]
         send parent, {pref, :ok}
         a = receive do x -> x after 1000 -> {:error, :timeout} end
         b = receive do x -> x after 1000 -> {:error, :timeout} end
