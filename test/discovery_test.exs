@@ -111,16 +111,9 @@ defmodule DiscoveryTests do
 
     test "appref subscribe" do
       :inets.start()
-      opts = Application.get_env(:spew, :discovery)
-      ip = (opts[:opts][:ip] || {127, 0, 0, 1}) |> Tuple.to_list |> Enum.join "."
-      port = case {opts[:schema], opts[:opts][:port]} do
-        {:https, nil} -> 443
-        {:http, nil} -> 80
-        {_schema, port} -> port
-      end
 
       appref = "appref-subscribe"
-      url = '#{opts[:schema] || "http"}://#{ip}:#{port}/subscribe/appref:#{appref}'
+      url = '#{httpurl}/subscribe/appref:#{appref}'
 
       {:ok, ref} = :httpc.request :get, {url, []}, [], [{:sync, :false}, {:stream, :self}]
       receive do
@@ -134,6 +127,52 @@ defmodule DiscoveryTests do
         {:http, {^ref, :stream, "event: appliance.add\ndata: " <> buf}} ->
           assert %{appref: ^appref, state: "waiting"} = decode(buf)
       end
+    end
+
+    test "await subscription" do
+      :inets.start()
+
+      appref1 = "await-sub-1"
+      appref2 = "await-sub-2"
+      query = "(appref:#{appref1} AND state:running),(appref:#{appref2} AND state:running)"
+      query = URI.encode query
+      url = '#{httpurl}/await/#{query}'
+
+      :ok = Discovery.add appref1, %{state: "running"}
+
+      {:ok, ref} = :httpc.request :get, {url, []}, [], [{:sync, :false}, {:stream, :self}]
+      assert 'chunked' = (receive do
+        {:http, {^ref, :stream_start, headers}} ->
+          assert 'chunked' = :proplists.get_value 'transfer-encoding', headers
+      end)
+
+      :ok = Discovery.add appref2, %{state: "waiting"}
+      {:ok, _} = Discovery.update appref2, %{state: "running"}
+
+      a = receive do
+        {:http, {^ref, :stream, "event: await.appliance\ndata: " <> buf}} ->
+          decode(buf)
+      end
+
+      b = receive do
+        {:http, {^ref, :stream, "event: await.appliance\ndata: " <> buf}} ->
+          decode(buf)
+      end
+
+      assert [%{appref: ^appref1, state: "running"},
+              %{appref: ^appref2, state: "running"}] = [a, b] |> Enum.sort
+    end
+
+    defp httpurl() do
+      opts = Application.get_env(:spew, :discovery)
+      ip = (opts[:opts][:ip] || {127, 0, 0, 1}) |> Tuple.to_list |> Enum.join "."
+      port = case {opts[:schema], opts[:opts][:port]} do
+        {:https, nil} -> 443
+        {:http, nil} -> 80
+        {_schema, port} -> port
+      end
+
+      '#{opts[:schema] || "http"}://#{ip}:#{port}/'
     end
 
     defp qresp(resp) do
@@ -208,12 +247,12 @@ defmodule DiscoveryTests do
 
       assert ["query-0", "query-2", "query-3", "query-5"] = qresp Discovery.get state: "waiting"
       assert ["query-3", "query-4"] = qresp Discovery.get tags: ["b"]
-      assert ["query-3"] = qresp Discovery.get tags: [["!a", "b"]]
-      assert ["query-4"] = qresp Discovery.get tags: [["a", "b"]]
-      assert ["query-0", "query-1", "query-3", "query-4", "query-5"] = qresp Discovery.get tags: ["!a", "b"]
-      assert ["query-3", "query-5"] = qresp Discovery.get tags: ["c", ["!a", "b"]]
-      assert ["query-4"] = qresp Discovery.get tags: ["b"], state: "running"
-      assert ["query-3"] = qresp Discovery.get tags: ["b"], state: "waiting"
+      assert ["query-3"] = qresp Discovery.get tags: ["!a", :and, "b"]
+      assert ["query-4"] = qresp Discovery.get tags: ["a", :and, "b"]
+      assert ["query-0", "query-1", "query-3", "query-4", "query-5"] = qresp Discovery.get tags: ["!a", :or, "b"]
+      assert ["query-3", "query-5"] = qresp Discovery.get tags: ["c", :or, ["!a", :and, "b"]]
+      assert ["query-4"] = qresp Discovery.get [[{:tags, ["b"]}, :and, {:state, "running"}]]
+      assert ["query-3"] = qresp Discovery.get [[{:tags, ["b"]}, :and, {:state, "waiting"}]]
     end
 
     defp qresp({:ok, resp}) do

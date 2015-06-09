@@ -55,6 +55,10 @@ defmodule Spew.Appliance do
           appref = Manager.gen_ref
           appopts = Dict.put appopts, :appref, appref
 
+          apploopstate = Log.init appref
+
+          waitfor_exit fn (_reason) -> Log.close apploopstate end
+
           Discovery.add appref, %{state: "waiting"}
           case module.run appopts, opts do
             {:ok, state} ->
@@ -70,7 +74,7 @@ defmodule Spew.Appliance do
                   Dict.put acc, action, [parent]
               end
 
-              apploop appstate, subscribers
+              apploop appstate, apploopstate, subscribers
 
             {:ok, state, monitor} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state, monitor)
@@ -86,7 +90,7 @@ defmodule Spew.Appliance do
                   Dict.put acc, action, [parent]
               end
 
-              apploop appstate, subscribers
+              apploop appstate, apploopstate, subscribers
 
             {:error, _err} = error ->
               send parent, {ref, error}
@@ -186,7 +190,7 @@ defmodule Spew.Appliance do
     :ok
   end
 
-  defp apploop(appstate, subscribers) do
+  defp apploop(appstate, loopstate, subscribers) do
     appref = appstate[:appref]
     apppid = appstate[:runstate][:pid]
 
@@ -196,19 +200,19 @@ defmodule Spew.Appliance do
         subscribers = Dict.put(subscribers,
                                action,
                                [from | subscribers[action] || []])
-        apploop appstate, subscribers
+        apploop appstate, loopstate, subscribers
 
       {:unsubscribe, ^appref, {:_, from}} ->
         subscribers = Enum.map subscribers, fn({_action, v}) ->
           v -- from
         end
-        apploop appstate, subscribers
+        apploop appstate, loopstate, subscribers
 
       {:unsubscribe, ^appref, {action, from}} ->
         subscribers = Dict.put(subscribers,
                                action,
                                (subscribers[action] || []) -- from)
-        apploop appstate, subscribers
+        apploop appstate, loopstate, subscribers
 
       {:DOWN, _ref, :process, ^apppid, _} ->
         :ok
@@ -221,15 +225,17 @@ defmodule Spew.Appliance do
             {action, pids}
           end
         end
-        apploop appstate, subscribers
+        apploop appstate, loopstate, subscribers
 
       {:input, ^appref, buf} ->
         :ok = :exec.send appstate[:runstate][:extpid], buf
-        apploop appstate, subscribers
+        Log.write loopstate, :stdin, buf
+        apploop appstate, loopstate, subscribers
 
       {device, _pid, buf} when device in [:stderr, :stdout] ->
         loopaction appref, :log, {device, buf}, subscribers
-        apploop appstate, subscribers
+        Log.write loopstate, device, buf
+        apploop appstate, loopstate, subscribers
     end
   end
 
@@ -249,6 +255,17 @@ defmodule Spew.Appliance do
 
     for pid <- push || [], do:
       send(pid, {action, appref, term})
+  end
+
+  defp waitfor_exit(fun) do
+    parent = self
+    spawn fn ->
+      ref = Process.monitor parent
+      receive do
+        {:DOWN, _ref, :process, _pid, reason} ->
+          fun.(reason)
+      end
+    end
   end
 
   @doc """
