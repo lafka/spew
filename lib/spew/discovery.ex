@@ -24,6 +24,143 @@ defmodule Spew.Discovery do
 
   def unsubscribe(ref), do: GenServer.call(@name, {:unsubscribe, ref})
 
+
+  defmodule Spec do
+    @moduledoc """
+    Functions to work with discovery appspecs
+    """
+
+    # Either a list of lists separated by OR for matching multi entities
+    # or a list of {k, v} pairs to denote matching against a single set
+    # of entities.
+    # if no specs are given behaviour is undefined and will change in
+    # future.
+    # or shortcuts the entire thing and returns first possible match
+
+    # {:ok, matched_specs} || false
+    @doc """
+    Returns the specs that match `app`
+    """
+    def match?(app, appspec) do
+      match?(app, appspec, [])
+    rescue e in [ArgumentError] ->
+      {:error, {:query, appspec}}
+    end
+    def match?(app, [], acc), do: acc
+    def match?(app, [:and | rest], acc), do:
+      {:error, {:query, "`and` not supported at top level, group condition"}}
+    def match?(app, [:or | rest], acc), do:
+      match?(app, rest, acc)
+    def match?(app, [spec | rest], acc) do
+      cond do
+        validate(app, spec) -> match? app, rest, [spec | acc]
+        true -> match? app, rest, acc
+      end
+    end
+
+    # match that app[k] matches values defined by v, `v` might 
+    # be scalar in or a complex list [`v1`, :or, `v1`
+    defp validate(app, {k, v}) when is_list(v), do:
+      validatelist(app[k], v)
+    defp validate(app, {k, "!" <> v}), do:
+      v !== nil and app[k] !== v
+    defp validate(app, {k, v}), do:
+      v !== nil and app[k] === v
+    defp validate(app, [item, :and | rest]), do:
+      validate(app, item) and validate(app, rest)
+    defp validate(app, [item, :or | rest]), do:
+      validate(app, item) or validate(app, rest)
+    defp validate(app, [item]), do:
+      validate(app, item)
+    defp validate(_app, _items) do
+      raise ArgumentError, message: "error in appspec"
+    end
+
+    defp validatelist(source, [item, :and | rest]), do:
+      validatelist_item(source, item) and validatelist(source, rest)
+    defp validatelist(source, [item, :or | rest]), do:
+      validatelist_item(source, item) or validatelist(source, rest)
+    defp validatelist(source, [item]), do:
+      validatelist_item(source, item)
+    defp validatelist(_source, _items) do
+        raise ArgumentError, message: "error in appspec"
+    end
+
+    defp validatelist_item(source, items) when is_list(items), do:
+      validatelist(source, items)
+    defp validatelist_item(source, "!" <> item), do:
+      ! Enum.member?(source, item)
+    defp validatelist_item(source, item), do:
+      Enum.member?(source, item)
+
+
+
+    # spec defined as this
+    # <k> : <v>, <k> : <v>
+    # where the `,` means its an OR query - literal seperatin in case of # `GET /await`.
+    # the operators `OR`, `AND` may be used infix.
+    # One can use () do group certain conditions.
+    # The structure returned is a list :: q() where each element is
+    # separated with `:and`/`:or`. If the element is another list that
+    # list will also be of type `q()`
+
+    def from_string(buf) do
+      case from_string buf, {"", []} do
+        [condition| rest] when condition in [:or, :and] ->
+          rest |> expand
+
+        conditions when is_list(conditions) ->
+          conditions |> expand
+
+        {_rest, _acc} = res ->
+          res
+      end
+    end
+
+    defp from_string("", {"", group}), do: group
+    defp from_string("", {acc, group}), do: [acc | group]
+
+    defp from_string("," <> rest, {"", group}),    do: from_string(rest, {"", group})
+    defp from_string("," <> rest, {k, group}),     do: from_string(rest, {"", [:or, k | group]})
+    defp from_string(" OR " <> rest, {k, group}),  do: from_string(rest, {"", [:or, k | group]})
+    defp from_string(" AND " <> rest, {k, group}), do: from_string(rest, {"", [:and, k | group]})
+
+    defp from_string("(" <> rest, {"", group}) do
+      {rest, innergroup} = from_string rest
+      from_string rest, {"", [:or, innergroup | group]}
+    end
+    defp from_string("(" <> rest, {_acc, group}) do
+      {rest, innergroup} = from_string rest
+      from_string rest, {"", [:or, innergroup | group]}
+    end
+    defp from_string(")" <> rest, {acc, group}), do: {rest, [acc|group]}
+
+    defp from_string(<<k :: binary-size(1), rest :: binary()>>, {acc, group}), do:
+      from_string(rest, {acc <> k, group})
+
+
+    defp expand(appspec), do: Enum.map(appspec, &expand2/1)
+    #defp expand([spec, :and | rest], {group, acc}), do:
+    #    expand(rest, {[spec, :and | group || []], acc})
+    #defp expand([item | rest], {nil, acc}), do:
+    #    expand(rest, [item | acc])
+    #defp expand([item | rest], {group, acc}), do:
+    #  expand(rest, {nil, [[item | group] | acc]})
+
+    defp expand2(operator) when is_atom(operator), do: operator
+    defp expand2(group) when is_list(group), do: expand(group)
+    defp expand2({_k, _v} = pair), do: pair
+    defp expand2(buf) do
+      case String.split buf, ":", parts: 2 do
+        [k, v] ->
+          {String.to_existing_atom(k), v}
+
+          [buf] ->
+            buf
+      end
+    end
+  end
+
   if :test === Mix.env do
     def flush, do: GenServer.call(@name, :flush)
   end
@@ -31,12 +168,15 @@ defmodule Spew.Discovery do
   defmodule Server do
     alias __MODULE__, as: Self
 
+    alias Spew.Discovery.Spec
+
     @name {:global, __MODULE__}
 
     defstruct apps: %{},
               subscriptions: %{}
 
     defmodule Item do
+      @derive [Access]
       defstruct state: "invalid",
                 exit_status: nil,
                 appref: nil,
@@ -104,45 +244,31 @@ defmodule Spew.Discovery do
       end
     end
     def handle_call({:query, appspec}, _from, %Self{apps: apps} = state) do
-      apps = Enum.reduce apps, [], fn({appref, app}, acc) ->
-        query_validate appspec, app, acc
-      end
-      {:reply, {:ok, apps}, state}
-    end
+      apps = Enum.reduce apps, [], fn
+        (_, {:error, _} = acc) ->
+          acc
 
-    defp query_validate([], app, acc), do: [app | acc]
-    defp query_validate([{_k, _v} = filter | rest], app, acc) do
-      if query_validate2 filter, app do
-        query_validate(rest, app, acc)
-      else
-        acc
+        ({appref, app}, acc) ->
+          case Spec.match? app, appspec do
+            {:error, {:query, _}} = err ->
+              err
+
+            [] ->
+              acc
+
+            _specs ->
+              [app | acc]
+          end
+      end
+
+      case apps do
+        {:error, _} = err ->
+          {:reply, err, state}
+
+        apps ->
+          {:reply, {:ok, apps}, state}
       end
     end
-    defp query_validate2({:tags, tags}, app) do
-      Enum.any? tags, &tagvalidator(&1, app.tags)
-    end
-    #defp query_validate2({:tags, ["!" <> tag | rest]}, app) do
-    #  if Enum.member? app.tags, tag do
-    #    false
-    #  else
-    #    query_validate2 {:tags, rest}, app
-    #  end
-    #end
-    #defp query_validate2({:tags, [tag | rest]}, app) do
-    #  if Enum.member? app.tags, tag do
-    #    query_validate2 {:tags, rest}, app
-    #  else
-    #    false
-    #  end
-    #end
-    defp query_validate2({k, [v]}, app), do:
-      query_validate2({k, v}, app)
-    defp query_validate2({k, v}, app), do:
-      v === Map.get(app, k)
-
-    defp tagvalidator("!" <> tag, match), do: ! Enum.member?(match, tag)
-    defp tagvalidator([_|_] = andtags, match), do: Enum.all?(andtags, &tagvalidator(&1, match))
-    defp tagvalidator(tag, match), do: Enum.member?(match, tag)
 
     def handle_call({:subscribe, appspec}, {from, _ref}, %Self{subscriptions: sub} = state) do
       ref = :crypto.hash(:sha256, :erlang.term_to_binary(make_ref))
@@ -201,7 +327,7 @@ defmodule Spew.Discovery do
         ({k, %{target: target, match: spec}}, acc) ->
           skip?  = Enum.member? ignore, k
 
-          matches? = [] !== query_validate(spec, appstate, []) and ! skip?
+          matches? = [] !== Spec.match?(appstate, spec) and ! skip?
           publish2 matches?, target, ev, k, acc
       end
     end
