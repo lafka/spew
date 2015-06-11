@@ -1,0 +1,201 @@
+#!/bin/bash
+# This simple utility provides shell script helpers to read and write
+# parameters to a spew host
+
+
+# exit statuses:
+# 1 -> invalid command
+# 2 -> missing dependency to run
+# 3 -> missing or invalid input
+# 4 -> failed to configure network
+# 5 -> failed to contact $SPEWHOST
+
+#command -v dhclient > /dev/null || {
+#	echo "error: dhclient not available" >&2;
+#	exit 2;
+#}
+#
+#command -v curl > /dev/null || {
+#	echo "error: curl not available" >&2;
+#	exit 2;
+#}
+#
+#[ -Z "$SPEWHOST" ] || {
+#	echo "error: \$SPEWHOST not available" >&2;
+#	exit 3;
+#}
+#
+#[ -Z "$APPREF" ] || {
+#	echo "error: \$APPREF not set not available" >&2;
+#	exit 3;
+#}
+
+_connect() {
+	dhclient -v ${IFACE:-host0} || exit 4
+	json=$(args_to_json $(ifconfig ${IFACE:-host0} | awk '/inet/{print $1":"$2}') $@)
+	curl -o /dev/null "$SPEWHOST/appliance" -X POST -d "$json" || exit 5
+	args_to_env $(ifconfig ${IFACE:-host0} | awk '/inet/{print $1":"$2}') $@
+}
+
+_publish() {
+	json=$(args_to_json $@)
+	curl -o /dev/null "$SPEWHOST/appliance/$APPREF" -X PUT -d "$json" || exit 5
+}
+
+_publish_after() {
+	cmd=$(tail_args $@)
+	eval $cmd
+	export exit_status=$?
+	_publish $(eval echo $@)
+}
+
+_await() {
+	# wait for everything to come available
+	local requires=
+	declare -A _AWAIT
+
+	args=$(echo "$*" | sed 's/ /,/')
+	# find which args are matched
+	json=$(curl -s "$SPEWHOST/appliance/$args" | sed "s/^\[//;s/]\$//;s/},/\n/g")
+
+	while [ $# -gt 0 ]; do
+		match="$1"
+		exportas="$2"
+
+		echo $json | while read line; do
+			output=$(_await_check "$line" "$match" "$exportas")
+			if [ -z $output ]; then
+				_AWAIT[$match]=$exportas
+				requires="$requires $match"
+			else
+				echo $output
+			fi
+		done
+
+		shift 2
+	done
+
+	_await2 $requires
+	return 0
+}
+
+_await2() {
+	json=$(curl -s "$SPEWHOST/await/$(echo "$*" | sed 's/ /,/')" | sed "s/^\[//;s/]\$//;s/},/\n/g")
+	echo "$json" | while read line; do
+		echo "recv: $line"
+	done
+}
+
+_await_check() {
+	input=$1
+	match=$2
+	exportas=$3
+
+	key=$(echo "$match" | sed 's/:.*//')
+	val=$(echo "$match" | sed 's/[^:]*://')
+
+	input=$(echo $input | sed -E 's/[{}]//g;
+		s/(^|,)"([^"]*)":/\n\2: /g;
+		s/[\["]//g;
+		s/]//g;
+		s/, ?/ /g;
+		s/\n//')
+	echo $input | while read line; do
+			inkey=$(echo "$line" | sed 's/:.*//')
+			inval=$(echo "$line" | sed 's/[^:]*: //')
+
+			if [ "$inkey" = "$key" ] && [ "$inval" = "$inval" ]; then
+				_export_env $exportas $input
+			fi
+	done
+}
+
+_export_env() {
+	# converts the yaml like data into shell variables prefixed by $exportas
+	exportas=$1
+	input=$2
+	echo $input | while read line; do
+		inkey=$(echo "$line" | sed 's/:.*//')
+		inval=$(echo "$line" | sed 's/[^:]*: //')
+
+		echo "${exportas}_$(echo $inkey | tr '[:lower:]' '[:upper:]')=$inval"
+	done
+}
+
+args_to_json() {
+	echo -n '{'
+	for arg in $@; do
+		[ "--" = "$arg" ] && break
+
+		key=$(echo "$arg" | sed 's/:.*//')
+		case "$key" in
+			inet) key=ip4 ;;
+			inet6) key=ip6 ;;
+		esac
+
+		val=$(echo "$arg" | sed 's/[^:]*://')
+
+		if [ "tags" = "$key" ]; then
+			echo -n "'$key':['$(echo $val | sed "s/,/','/g")'],"
+		else
+			echo -n "'$key':'$val',"
+		fi
+
+		shift
+	done | sed 's/,$//'
+	echo -n '}'
+}
+
+args_to_env() {
+	for arg in $@; do
+		[ "--" = "$arg" ] && break
+
+		key=$(echo "$arg" | sed 's/:.*//' | tr '[:lower:]' '[:upper:]')
+		case "$key" in
+			INET) key=IP4 ;;
+			INET6) key=IP6 ;;
+		esac
+
+		val=$(echo "$arg" | sed 's/[^:]*://')
+
+		if [ "TAGS" = "$key" ]; then
+			echo "'$key=$(echo $val | sed "s/,/ /g")"
+		else
+			echo "$key=$val"
+		fi
+	done
+}
+
+tail_args() {
+	for arg in $@; do
+		[ "--" != "$arg" ] && shift && continue
+		shift && break
+	done
+	echo $@
+}
+
+#cmd="$1"
+#shift
+#case "$cmd" in
+#	# connect to DHCP then notify spew that we are alive
+#	connect)
+#		_connect $@
+#		;;
+#
+#	publish)
+#		_publish $@
+#		;;
+#
+#	publish-after)
+#		_publish_after $@
+#		;;
+#
+#	await)
+#		_await $@
+#		;;
+#
+#	*)
+#		echo "usage: $0 connect|publish|publish-after|await <args>" >&2
+#		exit 1
+#		;;
+#esac
