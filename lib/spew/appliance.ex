@@ -59,7 +59,7 @@ defmodule Spew.Appliance do
 
           waitfor_exit fn (_reason) -> Log.close apploopstate end
 
-          Discovery.add appref, %{state: "waiting"}
+          Discovery.add appref, %{state: "waiting", appliance: hd(appopts[:appliance] || [cfgappopts.name])}
           case module.run appopts, opts do
             {:ok, state} ->
               {:ok, appref} = res = Manager.run([appopts, opts], state)
@@ -137,10 +137,10 @@ defmodule Spew.Appliance do
   end
   defp maybe_unpack(_appcfg, _opts), do: []
 
-  defp maybe_unpack2(target, appcfg, opts) do
+  defp maybe_unpack2(target, %{appref: appref} = appcfg, opts) do
     case SpewBuild.Build.find target do
       {:ok, [spec]} ->
-        SpewBuild.Build.unpack spec
+        SpewBuild.Build.unpack spec, appref
 
       {:ok, specs} ->
         {:error, {:multi_builds, specs}}

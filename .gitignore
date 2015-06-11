@@ -7,3 +7,4 @@ erl_crash.dump
 /test/chroot/bind/
 /test/chroot/etc/
 /rel/spew
+/test/integration/builds

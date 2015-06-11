@@ -1,8 +1,11 @@
 #!/bin/bash
 
-spewtils connect state:waiting tags:app:test-stack | env
+set -e
 
-spewtils await appliance:test-server SERVER | env
+eval export $(spewtils connect state:waiting tags:app:test-stack)
+
+eval export $(spewtils await "(appliance:test-server AND state:running)" SERVER)
 spewtils publish state:running
 
-echo "pong" | ncat "$SERVER_IP" -p "$SERVER_PORT"
+echo "connect: $SERVER_IP4:$SERVER_PORT"
+echo "ping" | ncat "$SERVER_IP4" "$SERVER_PORT"

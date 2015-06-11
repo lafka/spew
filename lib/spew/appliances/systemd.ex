@@ -38,7 +38,7 @@ defmodule Spew.Appliances.Systemd do
         shellopts = %{appopts | :runneropts => cmd,
                                 :appliance => [bin, appopts]}
 
-        Enum.each cont, fn(f) -> f.() end
+        Enum.reduce cont, shellopts, fn(f, acc) -> f.(acc) end
 
         Spew.Appliances.Shell.run shellopts, []
 
@@ -78,12 +78,13 @@ defmodule Spew.Appliances.Systemd do
   defp build_cmd([{:root, {:archive, archive}} | rest], opts, acc, cont) do
     case verify_archive archive do
       :ok ->
-        shasum = Path.basename archive, ".tar.gz"
-        target = Path.join [System.tmp_dir, "spew-#{shasum}"]
+        target = Path.join [System.tmp_dir, "spew/#{opts.appref}/root"]
 
-        unpack = fn() ->
+        # Maybe integrate with unpack functionality in SpewBuild.Build
+        unpack = fn(appopts) ->
           File.mkdir_p target
           :erl_tar.extract archive, [:compressed, {:cwd, target}]
+          Map.put appopts, :rootdir, target
         end
         build_cmd(rest, opts, ["-D", target | acc], [unpack | cont])
 
@@ -114,6 +115,25 @@ defmodule Spew.Appliances.Systemd do
         {:error, {:eisfile, dir}}
       true ->
         build_cmd rest, opts, ["-D", Path.absname(dir) | acc], cont
+    end
+  end
+
+  defp build_cmd([{:busybox?, true} | rest], opts, acc, cont) do
+    case System.find_executable "busybox" do
+      nil ->
+        {:error, "busybox not installed"}
+
+      busybox ->
+        copybusybox = fn(appopts) ->
+          dir = appopts[:rootdir]
+          unless File.exists? Path.join([dir, "bin", "busybox"]) do
+            File.mkdir_p! Path.join([dir, "bin"])
+            File.copy! busybox, path = Path.join([dir, "bin", "busybox"])
+            File.chmod! path, 777
+          end
+          appopts
+        end
+        build_cmd rest, opts, acc, [copybusybox | cont]
     end
   end
 

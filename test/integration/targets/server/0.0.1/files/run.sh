@@ -1,16 +1,12 @@
 #!/bin/bash
 
+set -e
+
 PORT=$((($RANDOM % 16384) + 1024))
 
-runapp() {
-	echo "ping" | ncat -l -p "$PORT" &
-	spewtils publish state:running
-	fg
-}
+eval export $(spewtils connect "port:$PORT" state:waiting tags:app:test-stack)
 
-spewtils connect port:inet state:waiting tags:app:test-stack | env
-
-spewtils publish-after \
-	state:stopped exit_status:\$exit_status? \
-	-- runapp $@
-
+spewtils publish state:running
+echo "listening 0.0.0.0:$PORT"
+echo "pong" | ncat -l -p "$PORT"
+spewtils publish state:stopped exit_status:$?

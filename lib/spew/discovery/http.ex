@@ -23,7 +23,16 @@ defmodule Spew.Discovery.HTTP do
       appref ->
         case Discovery.add body[:appref], body do
           :ok ->
-            send_resp conn, 201, ""
+            send_resp conn, 201, encode(body)
+
+          {:error, {:app_exists, ^appref}} ->
+            case Discovery.update appref, body do
+              {:ok, newbody} ->
+                send_resp conn, 200, encode(newbody)
+
+              err ->
+                send_resp conn, 400, ""
+            end
 
           err ->
             send_resp conn, 400, ""

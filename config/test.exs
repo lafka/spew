@@ -6,7 +6,7 @@ config :spew, :appliance,
 config :spew, :discovery,
   opts: [
     port: 7071,
-    ip: {127, 0, 0, 1}
+    ip: {172, 20, 0, 1}
   ],
   schema: :http
 

@@ -89,18 +89,18 @@ defmodule Spew.Discovery do
       validate(src, item)
 
     defp validate(%{} = src, {k, v}) do
-      srclist? = is_list src[k]
+      srclist? = is_list prevval = Map.get(src, k)
       srctarget? = is_list v
 
       case {srclist?, srctarget?} do
         {true, true} ->
-          validate src[k], v
+          validate prevval, v
 
         {true, false} ->
-          validate src[k], [v]
+          validate  prevval, [v]
 
         {false, _} ->
-          validate src[k], v
+          validate prevval, v
       end
     end
     defp validate(src, match) when is_list(src) and is_list(match) do
@@ -169,6 +169,9 @@ defmodule Spew.Discovery do
         conditions when is_list(conditions) ->
           {:ok, Enum.reverse conditions}
 
+        {"", acc} ->
+          {:ok, acc}
+
         {_rest, _acc} = res ->
           res
       end
@@ -185,6 +188,7 @@ defmodule Spew.Discovery do
     #        or `tags:(riak AND production)
     #  `OR` groups with the previous expression and requires either of
     #       them to be true. Use like `AND`
+    defp from_string(:ok, acc), do: from_string("", acc)
     defp from_string("", {{"", _val} = buf, acc}), do: Enum.reverse(acc)
     defp from_string("", {{_key, _val} = buf, acc}), do: Enum.reverse(ins_kv(nil, buf, acc))
 
@@ -238,11 +242,13 @@ defmodule Spew.Discovery do
               subscriptions: %{}
 
     defmodule Item do
-      @derive [Access]
       defstruct state: "invalid",
                 exit_status: nil,
                 appref: nil,
-                tags: []
+                tags: [],
+                ip4: nil,
+                ip6: nil,
+                appliance: nil    # name of build
     end
 
     def init(_opts), do: {:ok, %Self{}}

@@ -37,8 +37,8 @@ defmodule SpewBuild.Build do
     end
   end
 
-  def unpack(%{"ARCHIVE" => archive}) do
-    target = Path.join System.tmp_dir, "spew-run-" <> Path.basename(archive, ".tar.gz")
+  def unpack(%{"ARCHIVE" => archive}, appref) do
+    target = Path.join System.tmp_dir, "spew", appref, "root"
 
     Logger.debug """
     extracting archive:
@@ -49,7 +49,7 @@ defmodule SpewBuild.Build do
     :erl_tar.extract archive, [{:cwd, target}]
     {:ok, target}
   end
-  def unpack(_buildspec), do: {:error, :undefined_archive}
+  def unpack(_buildspec, _), do: {:error, :undefined_archive}
 
   defp parsemeta(buf) do
     pair String.split(buf, ["\n", "="], trim: true)
