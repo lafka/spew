@@ -1,4 +1,9 @@
-/_build
+_build
 /deps
 erl_crash.dump
 *.ez
+/spew-cli/bin/spew-cli
+/test/chroot/bin/busybox
+/test/chroot/bind/
+/test/chroot/etc/
+/rel/spew
