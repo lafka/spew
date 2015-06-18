@@ -56,4 +56,32 @@ defmodule Spew.Utils do
   defp norm([]), do: %{}
   defp norm([{_,_}|_] = x), do: Enum.into(x, %{})
 
+
+  defmodule Fs do
+    def mounted?(target), do: mounted?(target, nil)
+    def mounted?(target, source) do
+      {buf, 0} = System.cmd System.find_executable("mount"), []
+      case Regex.run ~r/(.*?)\son\s(#{target})/, buf do
+        [_line, ^source, ^target] ->
+            true
+
+        [_line, _source, ^target] when source === nil ->
+            true
+
+        _ ->
+          false
+      end
+    end
+
+    def bindmount(source, target) do
+      IO.puts 'sudo mount -o bind,ro "#{source}" "#{target}"'
+      case :exec.run 'sudo mount -o bind,ro "#{source}" "#{target}"', [:sync, :stderr, :stdout] do
+        {:ok, []} ->
+          :ok
+
+        {:error, err} ->
+          {:error, err[:exit_status]}
+      end
+    end
+  end
 end

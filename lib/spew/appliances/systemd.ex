@@ -29,6 +29,8 @@ defmodule Spew.Appliances.Systemd do
     ro: bool(),
   """
 
+  alias Spew.Utils
+
   def run(appopts, _opts) do
     runneropts = Dict.put_new appopts[:runneropts] || [], :name, appopts[:name]
     case build_cmd Enum.into(runneropts, []), appopts do
@@ -74,6 +76,23 @@ defmodule Spew.Appliances.Systemd do
 
   defp build_cmd([{:command, v} | rest], appcfg, acc, cont), do:
     build_cmd(rest, appcfg, acc ++ [appcfgtpl(Enum.join(v, " "), appcfg)], cont)
+
+
+  defp build_cmd([{:root, {:bind, source}} | rest], opts, acc, cont) do
+    target = Path.join [System.tmp_dir, "spew/#{opts.appref}/root"]
+    File.mkdir_p! target
+
+
+    mount = fn(appopts) ->
+      if ! Utils.Fs.mounted? target do
+        :ok = Utils.Fs.bindmount source, target
+        Map.put appopts, :rootdir, target
+      end
+    end
+
+    build_cmd rest, opts, ["-D", target | acc], [mount | cont ]
+  end
+
 
   defp build_cmd([{:root, {:archive, archive}} | rest], opts, acc, cont) do
     case verify_archive archive do
@@ -194,10 +213,10 @@ defmodule Spew.Appliances.Systemd do
       ! File.exists? archive ->
         {:error, {:archive, :not_found, archive}}
 
-      shasum != Spew.Utils.hashfile(:sha, archive) ->
+      shasum != Utils.hashfile(:sha, archive) ->
         {:error, :checksum}
 
-      :ok != Spew.Utils.gpgverify(archive <> ".asc", archive) ->
+      :ok != Utils.gpgverify(archive <> ".asc", archive) ->
         {:error, :signature}
 
       :true ->

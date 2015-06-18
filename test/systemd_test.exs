@@ -57,6 +57,23 @@ defmodule SystemdTest do
 #    assert nil, "dir chroot test not implemented"
 #  end
 #
+
+  test "bind-ro chroot", ctx do
+    {:ok, appref} = Appliance.run nil, %{
+      name: testname(ctx),
+      type: :systemd,
+      runneropts: [
+        root: {:bind, "/"},
+        command: ["/bin/bash -c 'echo bound for greatness'"]
+      ]
+    }, [subscribe: [:log]]
+
+    assert_receive {:log, ^appref, {:stdout, "bound for greatness\n"}}, 1000
+    on_exit fn ->
+      Appliance.stop appref, kill?: true, keep?: false
+    end
+  end
+
   test "archive chroot", ctx do
     {:error, :checksum} = Appliance.run nil, %{
       name: testname(ctx),

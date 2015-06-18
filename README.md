@@ -22,9 +22,12 @@ To run systemd containers spew requires root access. To make this work
 
 
 ```
-Cmnd_Alias NSPAWN = /usr/bin/systemd-nspawn
-user ALL = (root) NOPASSWD: NSPAWN
+Cmnd_Alias NSPAWN = /usr/bin/systemd-nspawn, /usr/bin/machinectl
+Cmnd_Alias SPEWMOUNT = /usr/bin/mount -o bind\,ro / /tmp/spew/*/root, /usr/bin/umount /tmp/spew/*/root
+user ALL = (root) NOPASSWD: NSPAWN, SPEWMOUNT
 Defaults!NSPAWN !requiretty
+Defaults!SPEWMOUNT !requiretty
+
 ```
 
 ## API
