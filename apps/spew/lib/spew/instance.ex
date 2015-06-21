@@ -14,7 +14,7 @@ defmodule Spew.Instance do
       rootfs: nil,                    # {type(), opts :: term()}
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
-      state: {:waiting, :erlang.now}, # {state(), now()}
+      state: {:waiting, {0, 0, 0}},   # {state(), now()}
       runtime: %{}                    # runtime specific opts like logging, metrics
     ]
   end

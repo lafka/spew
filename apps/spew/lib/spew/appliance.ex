@@ -23,6 +23,15 @@ defmodule Spew.Appliance do
   """
   def delete(ref), do: GenServer.call(@name, {:delete, ref})
 
+  @doc """
+  Reload configuration from disk
+  """
+  def reload, do: GenServer.call(@name, :reload)
+
+  if Mix.env in [:dev, :test] do
+    def reset, do: GenServer.call(@name, :reset)
+  end
+
   defmodule Item do
     defstruct [
       ref: nil,                             # the actual id of the appliance
@@ -47,10 +56,12 @@ defmodule Spew.Appliance do
 
     require Logger
 
+    alias Spew.Utils
     alias Spew.Appliance.Item
 
     defmodule State do
-      defstruct appliances: %{}
+      defstruct appliances: %{},
+                names: %{}
     end
 
     def start_link do
@@ -58,8 +69,40 @@ defmodule Spew.Appliance do
     end
 
     def init(_) do
-      # todo load appliance config from disk
-      {:ok, %State{}}
+      {:reply, :ok, state} = handle_call :reload, {self, make_ref}, %State{}
+      {:ok, state}
+    end
+
+    defp load_configs() do
+      searchpath = [
+        Path.join([Spew.root, "appliances", "*"])
+        | Application.get_env(:spew, :appliancepaths) || []
+      ]
+
+      Enum.reduce searchpath, %{}, fn(path, acc) ->
+        path = Path.join path, "*.exs"
+        Path.expand(path)
+          |> Path.wildcard
+          |> Enum.reduce acc, fn(file, acc) ->
+
+          {cfg, []} = Code.eval_file file
+          ref = Utils.hash cfg
+          val = Map.merge %Item{}, Map.put(cfg, :ref, ref)
+          Map.put_new acc, ref, val
+        end
+      end
+    end
+
+    def handle_call(:reload, _from, state) do
+      appliances = load_configs
+
+      names = Enum.reduce appliances, %{}, fn({ref, %{name: name}}, acc) ->
+        Map.put(acc, name, ref)
+      end
+
+      Logger.debug "found #{Map.size(appliances)} appliances"
+      {:reply, :ok, %State{ appliances: appliances,
+                            names: names}}
     end
 
     def handle_call({:add, name, {_t, _spec} = app, instance, enabled?}, _from, state) do
@@ -73,12 +116,14 @@ defmodule Spew.Appliance do
             enabled?: enabled?
           }
 
-          ref = hash appliance
+          ref = Utils.hash appliance
           appliance = %{appliance | ref: ref}
 
           {:reply,
             {:ok, appliance},
-            %{state | appliances: Dict.put(state.appliances, ref, appliance)}}
+            %{state |
+              appliances: Map.put(state.appliances, ref, appliance),
+              names: Map.put(state.names, name, ref)}}
 
         [{ref, _} | _] ->
           {:reply, {:error, {:conflict, {:appliance, ref}}}, state}
@@ -86,7 +131,7 @@ defmodule Spew.Appliance do
     end
 
     def handle_call({:get, ref}, _from, state) do
-      case state.appliances[ref] do
+      case state.appliances[ref] || state.appliances[ state.names[ref] ]do
         nil ->
           {:reply, {:error, {:notfound, {:appliance, ref}}}, state}
 
@@ -99,15 +144,27 @@ defmodule Spew.Appliance do
       {:reply, {:ok, Dict.values(state.appliances)}, state}
     end
 
-    def handle_call({:delete, ref}, _from, %{appliances: appliances} = state) do
-      {:reply, :ok, %{state | appliances: Dict.delete(appliances, ref)}}
+    def handle_call({:delete, ref}, _from, state) do
+      case {state.appliances[ref], state.appliances[ state.names[ref] ]} do
+        {nil, nil} ->
+          {:error, {:notfound, {:appliance, ref}}}
+
+        {app, nil} ->
+          {:reply, :ok, %{state |
+            appliances: Map.delete(state.appliances, ref),
+            names: Map.delete(state.names, app.name)}}
+
+        {_, appref} ->
+          {:reply, :ok, %{state |
+            appliances: Map.delete(state.appliances, appref),
+            names: Map.delete(state.names, ref)}}
+      end
     end
 
-    defp hash(data) do
-      :crypto.hash(:sha256, :erlang.term_to_binary(data))
-        |> Base.encode32
-        |> String.slice(0, 16)
-        |> String.downcase
+    if Mix.env in [:dev, :test] do
+      def handle_call(:reset, _from, _) do
+        {:reply, :ok, %State{}}
+      end
     end
   end
 end

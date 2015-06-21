@@ -16,6 +16,10 @@ defmodule Spew do
     Supervisor.start_link(children, opts)
   end
 
+  def root do
+    Application.get_env :spew, :spewroot
+  end
+
   defp check_prereqs do
     Enum.each ["gpg", "tar", "systemd-nspawn"], &has_cmd?/1
     has_overlayfs?
