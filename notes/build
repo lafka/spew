@@ -1,0 +1,11 @@
+A build is something to run.
+
+With a build you should be able to:
+ - Create a new appliance
+ - Run a instance with that build
+ - Deploy to host (it's like a pre-deploy)
+
+
+On a related note, the concept of a build target is that you have some
+kind of package with a specific version. One build can be found from a
+target.
