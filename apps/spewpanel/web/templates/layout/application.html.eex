@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="">
+    <meta name="author" content="">
+
+    <title>Hello Phoenix!</title>
+    <link rel="stylesheet" href="<%= static_path(@conn, "/css/app.css") %>">
+    <link rel="stylesheet" href="<%= static_path(@conn, "/css/theme.css") %>">
+  </head>
+
+  <body>
+    <header class="container-nav" role="main">
+      <div class="navbar-collapse collapse">
+        <ul class="nav navbar-nav">
+          <li><span class="logo"><a href="/">Spew</a></span></li>
+          <li><%= link "Dashboard", to: "/" %></li>
+          <li><%= link "Appliances", to: "/appliance" %></li>
+          <li><%= link "Instances", to: "/instance" %></li>
+          <li><%= link "Machines", to: "/host" %></li>
+          <li><%= link "Builds", to: "/build" %></li>
+        </ul>
+      </div>
+    </header>
+
+    <div class="container-fluid" role="main">
+      <p class="alert alert-info" role="alert"><%= get_flash(@conn, :info) %></p>
+      <p class="alert alert-danger" role="alert"><%= get_flash(@conn, :error) %></p>
+
+      <%= @inner %>
+
+    </div> <!-- /container -->
+    <script src="<%= static_path(@conn, "/js/app.js") %>"></script>
+    <script>require("web/static/js/app")</script>
+  </body>
+</html>

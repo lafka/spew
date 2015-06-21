@@ -1,0 +1,58 @@
+<div class="col-xs-2" id="sidebar">
+  <h5>Filters</h4>
+
+  <a href="/appliance?create=true" class="btn btn-sm btn-primary">Create appliance</a>
+</div>
+
+<div class="col-xs-10">
+  <div class="page-header">
+    <h4>Create Appliance</h4>
+  </div>
+
+  <div class="form">
+    <form class="form-horizontal" action="/appliance?create=true" method="post">
+      <div class="form-group">
+        <label class="col-xs-2 control-label" for="appliance-name">Name</label>
+        <div class="col-xs-10">
+          <input input="text" class="form-control" id="appliance-name" name="appliance-name" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="col-xs-2 control-label" for="appliance-source">Appliance</label>
+        <div class="col-xs-10">
+          <select name="appliance-source" class="form-control">
+            <%= for {ref, build} <- @builds do %>
+              <option value="<%= ref %>">
+                <%= build["TARGET"] <> "/" <> build["VSN"] <> "-" <> ref %>
+              </option>
+            <%= end %>
+          </select>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="col-xs-2 control-label" for="appliance-enable">
+          Enable?
+        </label>
+        <div class="col-xs-10">
+          <input type="checkbox" name="appliance-enable" checked />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="col-xs-2 control-label" for="appliance-opts">Instance Opts</label>
+        <div class="col-xs-10">
+          <textarea class="form-control" name="appliance-opts" placeholder="key: term..."></textarea>
+        </div>
+      </div>
+
+      <div class="form-action col-xs-10 col-xs-offset-2">
+        <button type="submit" class="btn btn-sm btn-primary">Create</button>
+        <a href="/appliance" class="btn btn-sm btn-danger">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<pre><%= inspect @params %></pre>

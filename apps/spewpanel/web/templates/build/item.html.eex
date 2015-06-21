@@ -1,0 +1,56 @@
+<div id="sidebar">
+  <h5 class="title">Build</h5>
+
+  <ul class="nav">
+    <li><a href="#">Create new appliance</a></li>
+    <li><a href="#">Run instance</a></li>
+    <li><a href="#">Deploy to host</a></li>
+  </ul>
+</div>
+
+<div class="col-xs-10 build">
+  <div class="breadcrumbs">
+    <span class="back"><a href="/">&laquo;- Dashboard</a></span>
+      &ndash;
+    <span class="">
+      <span>/ <a href="/build">Builds</a></span>
+      <span>/ <a href="/build/<%= @params["build"] %>"><%= @params["build"] %></a></span>
+    </span>
+  </div>
+
+  <h1>Build: <%= @params["build"] %></h1>
+
+  <div>
+    <div class="page-header">
+      Build meta
+    </div>
+
+    <dl class="dl-horizontal">
+      <%= for {k, v} <- @build do %>
+      <dt><%= k %></dt>
+      <dd><%= v %></dd>
+      <%= end %>
+    </dl>
+  </div>
+
+  <div>
+    <div class="page-header">
+      Appliances
+    </div>
+    @todo
+  </div>
+
+  <div>
+    <div class="page-header">
+      Intances
+    </div>
+    @todo
+  </div>
+
+  <div>
+    <div class="page-header">
+      Hosts
+    </div>
+    @todo
+  </div>
+</div>

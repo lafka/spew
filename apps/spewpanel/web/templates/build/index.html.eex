@@ -1,0 +1,52 @@
+<div id="sidebar">
+  <h5 class="title">Builds</h5>
+
+  <ul class="nav">
+  <%= for {name, targets} <- @tree do %>
+    <li><a href="/build?query=TARGET == '<%= name %>'"><%= name %></a></li>
+    <ul class="nav nav-child">
+    <%= for {vsn, _} <- targets do %>
+      <li><a href="/build?query=TARGET == '<%= name %>' and VSN == '<%= vsn %>'"><%= vsn %></a></li>
+    <%= end %>
+    </ul>
+  <%= end %>
+  </ul>
+</div>
+
+<div class="col-xs-10 builds">
+  <div class="breadcrumbs">
+    <span class="back"><a href="/">&laquo;- Dashboard</a></span>
+      &ndash;
+    <span class="">
+      <span>/ <a href="/build">Builds</a></span>
+      <%= if @params["query"] do %>
+        <span><span class="block"><%= @params["query"] %></span></span>
+      <% end %>
+    </span>
+  </div>
+
+  <%= for {ref, build} <- Enum.slice(@builds, 0, 10) do %>
+    <div class="row">
+      <div class="container-fluid">
+        <div class="build">
+          <div class="col-xs-9">
+            <h4><a href="/build/<%= ref %>"><%= build["TARGET"] %>/<%= build["VSN"] %> - <%= ref %></a></h4>
+
+             <p class="meta">
+              <span class="type"><%= build["TYPE"] %></span>;
+              buildt <span class="date"><%= build["BUILDDATE"] %>;
+              hosted by <span class="host"><%= build["HOST"] %></span>
+            </p>
+          </div>
+          <div class="col-xs-3">
+            <ul>
+              <li>Appliances: 0; <a href="">+ create</a></li>
+              <li>Instances: 0; <a href="">+ run</a></li>
+              <li>Hosts: 0; <a href="">+ deploy</a<</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  <%= end %>
+</div>

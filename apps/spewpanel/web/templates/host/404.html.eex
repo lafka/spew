@@ -1,0 +1,14 @@
+
+<div class="col-xs-2" id="sidebar">
+  <h5>Hosts</h4>
+
+  <ul>
+  <%= for host <- hosts do %>
+    <li><a href="/host/<%= host[:name] %>"><%= host[:name] %></a></li>
+  <% end %>
+  </ul>
+</div>
+
+<div class="col-xs-10">
+  Fix me, i'm a missing host!
+</div>

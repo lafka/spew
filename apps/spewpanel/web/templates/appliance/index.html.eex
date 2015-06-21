@@ -1,0 +1,13 @@
+<div class="col-xs-2" id="sidebar">
+  <h5>Filters</h4>
+
+  <a href="/appliance?create=true" class="btn btn-sm btn-primary">Create appliance</a>
+</div>
+
+<div class="col-xs-10">
+  <%= for appliance <- @appliances do %>
+    <div class="appliance">
+      <h4><a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a></h4>
+    </div>
+  <% end %>
+</div>
