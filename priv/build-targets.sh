@@ -17,9 +17,9 @@ export SPEW_BUILDS="$dir/builds"
 
 mkdir -p "$SPEW_BUILDS"
 
-spew-build delete-build busybox/0.0.1 test-client/0.0.1 test-server/0.0.1
+targets=${*:-alpine/edge devin/edge busybox/0.0.1 test-client/0.0.1 test-server/0.0.1}
+spew-build delete-build $targets
 
-spew-build build busybox/0.0.1
-spew-build build test-client/0.0.1
-spew-build build test-server/0.0.1
-
+for target in $targets; do
+	spew-build build "$target"
+done

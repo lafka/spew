@@ -9,3 +9,13 @@ With a build you should be able to:
 On a related note, the concept of a build target is that you have some
 kind of package with a specific version. One build can be found from a
 target.
+
+To get started lets bootstrap and run `devin`:
+
+```
+# this will take sometime
+priv/build-targets.sh alpine/edge devin/edge
+spew-build run spew.dev devin/edge --bind $PWD:/app /bin/sh
+curl -o /root/.mix/archives/hex.ez https://s3.amazonaws.com/s3.hex.pm/installs/1.0.0/hex.ez"
+```
+

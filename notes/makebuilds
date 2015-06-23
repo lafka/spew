@@ -1,0 +1,32 @@
+A build a is spew archive
+
+They have some meta info stored in SPEWMETA, then the rest is the
+rootfs that we will use to run from.
+
+You can use any linux distro by using debootstrap, pacstrap or
+similar. This document describes how to build most of the stuff using
+alpine linux.
+
+
+Most of the things we will be building will be using erlang/elixir.
+For that reason we need a build for development and generating
+releases.
+
+
+priv/build-targets.sh alpine/edge devin/edge
+
+
+To bootstrap the initial alpine system we need a copy of `apk`. This
+may be available in your repository, otherwise can be found here[1].
+
+[1] $ALPINEMIRROR/v3.0/main/x86_64/apk-tools-static-2.4.4-r0.apk
+
+Once we have our base system setup with (script will be added, in the
+meantime checkout[2]) alpine-sdk included and a copy of
+git://dev.alpinelinux.org/aports . we can build elixir.
+
+[2] http://wiki.alpinelinux.org/wiki/Installing_Alpine_Linux_in_a_chroot
+
+All the tooling for building nif's etc will already be there.
+
+
