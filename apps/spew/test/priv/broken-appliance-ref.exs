@@ -1,7 +1,7 @@
 %{
   name: "broken-appliance-ref",
   ref: "new-ref",
-  runtime: "",
+  runtime: nil,
   instance: %{
     runner: Spew.Runner.Void,
   },

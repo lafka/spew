@@ -1,6 +1,6 @@
 %{
   name: "void",
-  runtime: "",
+  runtime: nil,
   instance: %{
     runner: Spew.Runner.Void,
   },

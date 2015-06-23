@@ -74,8 +74,7 @@ defmodule Spew.Appliance do
     defstruct [
       ref: nil,                             # the actual id of the appliance
       name: nil,                            # string()
-      runtime: "",                          # the query for the build
-      appliance: {"spew-archive-1.0", nil}, # What type of appliance, second argument is the build spec
+      runtime: {:query, ""},                # {:query, ""} | {:ref, _} | [ref()]
       instance: %Spew.Instance.Item{        # defaults is merged with instance cfg
         runner: Spew.Runner.Systemd,
         supervision: false,
@@ -154,7 +153,7 @@ defmodule Spew.Appliance do
 
           ref = Utils.hash appliance
           appliance = %{appliance | ref: ref,
-                                    appliance: find_runtime(runtime, true)}
+                                    runtime: normalize_runtime(runtime)}
 
           {:reply,
             {:ok, appliance},
@@ -293,8 +292,9 @@ defmodule Spew.Appliance do
 
         ref = Utils.hash cfg
         val = Map.merge %Item{}, cfg
+
         val = %{val | ref: ref,
-                      appliance: find_runtime(val.runtime, false)}
+                      runtime: normalize_runtime(val.runtime)}
 
         files = Map.put files, file, [ref | files[file] || []]
         apps = Map.put_new apps, ref, val
@@ -303,21 +303,13 @@ defmodule Spew.Appliance do
       end
     end
 
-    defp find_runtime("", _), do: {nil, nil}
-    defp find_runtime(nil, _), do: {nil, nil}
-    defp find_runtime(query, raise?) do
-      q = ExQuery.Query.from_string query
+    defp normalize_runtime(nil), do: nil
+    defp normalize_runtime({:ref, ref}) when not is_list(ref), do: fn -> [ref] end
+    defp normalize_runtime({:ref, refs}), do: fn -> refs end
+    defp normalize_runtime({:query, query}), do: fn ->
       {:ok, builds} = Spew.Build.list
-      case Enum.filter Map.values(builds), q do
-        [] when raise? ->
-          raise NoRuntime, query: query
-
-        [] ->
-          {nil, nil}
-
-        [build | _] ->
-          {build["TYPE"], build}
-      end
+      q = ExQuery.Query.from_string(query)
+      Enum.filter builds, fn({_ref, spec}) -> q.(spec) end
     end
   end
 end

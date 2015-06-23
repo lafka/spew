@@ -12,32 +12,32 @@ defmodule SpewApplianceTest do
   end
 
   test "get by name" do
-    {:ok, app} = Appliance.add "get-by-name", "", %{}, true
+    {:ok, app} = Appliance.add "get-by-name", nil, %{}, true
     assert {:ok, ^app} = Appliance.get app.name
   end
 
   test "get by ref" do
-    {:ok, app} = Appliance.add "get-by-ref", "", %{}, true
+    {:ok, app} = Appliance.add "get-by-ref", nil, %{}, true
     assert {:ok, ^app} = Appliance.get app.ref
   end
 
   test "delete by name" do
-    {:ok, app} = Appliance.add "delete-by-name", "", %{}, true
+    {:ok, app} = Appliance.add "delete-by-name", nil, %{}, true
     :ok = Appliance.delete app.name
     {:error, {:notfound, {:appliance, _}}} = Appliance.get app.name
   end
 
   test "delete by ref" do
-    {:ok, app} = Appliance.add "delete-by-ref", "", %{}, true
+    {:ok, app} = Appliance.add "delete-by-ref", nil, %{}, true
     :ok = Appliance.delete app.ref
     {:error, {:notfound, {:appliance, _}}} = Appliance.get app.ref
   end
 
   test "list appliances" do
-    {:ok, app1} = Appliance.add "list-1", "", %{}, true
-    {:ok, app2} = Appliance.add "list-2", "", %{}, true
-    {:ok, app3} = Appliance.add "list-3", "", %{}, true
-    {:ok, app4} = Appliance.add "list-4", "", %{}, true
+    {:ok, app1} = Appliance.add "list-1", nil, %{}, true
+    {:ok, app2} = Appliance.add "list-2", nil, %{}, true
+    {:ok, app3} = Appliance.add "list-3", nil, %{}, true
+    {:ok, app4} = Appliance.add "list-4", nil, %{}, true
 
     {:ok, apps} = Appliance.list
     assert Enum.sort([app1, app2, app3, app4]) == Enum.sort(apps)
@@ -78,12 +78,24 @@ defmodule SpewApplianceTest do
   end
 
   test "find runtime" do
-    {:ok, app} = Appliance.add "dont-find-runtime", "", %{}, true
-    assert {nil, nil} == app.appliance
+    # Check that when no runtime specified
+    {:ok, app} = Appliance.add "no-runtime", nil, %{}, true
+    assert nil == app.runtime
 
-    assert {:error, %NoRuntime{}} = Appliance.add "no-find-runtime", "TARGET == 0", %{}, true
+    # Add specific runtimes
+    runtimeref = "i'm-a-build"
+    {:ok, app} = Appliance.add "concrete-runtime", {:ref, runtimeref}, %{}, true
+    assert [runtimeref] == app.runtime.()
 
-    {:ok, app} = Appliance.add "find-runtime", "TARGET == 'dummy'", %{}, true
-    assert {"spew-archive-1.0", %{"TARGET" => "dummy"}} = app.appliance
+    runtimerefs = ["so", "many", "builds"]
+    {:ok, app} = Appliance.add "concrete-runtimes", {:ref, runtimerefs}, %{}, true
+    assert runtimerefs == app.runtime.()
+
+    # There is no runtime
+    {:ok, app} = Appliance.add "no-find-runtime", {:query, "TARGET == 0"}, %{}, true
+    assert [] == app.runtime.()
+
+    {:ok, app} = Appliance.add "find-runtime", {:query, "TARGET == 'dummy'"}, %{}, true
+    assert [{_ref, _spec} | _] = app.runtime.()
   end
 end
