@@ -3,3 +3,4 @@
 erl_crash.dump
 *.ez
 priv/builds/
+apps/spew/test/builds/

@@ -20,7 +20,8 @@ defmodule Spewbuild do
 
     spewpath = spewpath || Application.get_env(:spew, :buildpath) || []
     Enum.flat_map(spewpath, fn(path) ->
-      paths = Path.wildcard Path.join([path, pattern, "**", "*.tar.gz"]) |> Path.expand
+      globpath = Path.join([path, pattern, "**", "*.tar"]) |> Path.expand
+      paths = Path.wildcard(globpath)
       Enum.map paths, &buildinfo/1
     end) |> Enum.into %{}
   end
@@ -44,7 +45,10 @@ defmodule Spewbuild do
             |> Dict.put("CHECKSUM", Path.basename(archive, ".tar.gz"))
             |> Dict.put("HOST", "#{node}")
             |> Dict.put("TYPE", "spew-archive-1.0")
-    {meta["CHECKSUM"], meta}
+
+    hash = Spew.Utils.File.hash archive
+
+    {hash, meta}
   end
 
   defp parsemeta(buf) do
