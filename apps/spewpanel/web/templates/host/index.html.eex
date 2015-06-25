@@ -12,9 +12,9 @@
 <div class="col-xs-10">
   <%= for host <- @hosts do %>
     <div class="host">
-      <h4><a href="/host/<%= host[:name] %>"><%= host[:name] %></a></h4>
+      <h3><a href="/host/<%= host[:name] %>"><%= host[:name] %></a></h3>
 
-      <h5>Network</h5>
+      <h4>Network</h4>
       <div class="row">
         <%= for iface <- host[:inet] do %>
         <div class="col-sm-3">
@@ -37,17 +37,33 @@
         </div>
         <% end %>
       </div>
-      <div class="builds">
-        <h5>Builds</h5>
+
+      <hr>
+
+      <div class="builds col-xs-4">
+        <h4>Builds</h4>
         <ul>
-        <%= for  {target, vsns} <- get_builds_tree(host[:builds]) do %>
-          <%= for {vsn, refs} <- vsns do %>
-            <a href="/build/?q=TARGET:<%= target %>+AND+VSN:<%= vsn %>"><%= target %>/<%= vsn %></a> &ndash;
-          <%= end %>
+        <%= for {ref, build} <- host[:builds] do %>
+          <li><a href="/build/<%= ref %>"><%= build.target %></a></li>
         <%= end %>
         </ul>
       </div>
 
+      <div class="appliances col-xs-4">
+        <h4>Appliances</h4>
+        <ul>
+        <%= for appliance <- host[:appliances] do %>
+          <li><a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a></li>
+        <%= end %>
+        </ul>
+      </div>
+
+      <div class="appliances col-xs-4">
+        <h4>Instances</h4>
+        <ul>
+          Not implemeneted
+        </ul>
+      </div>
     </div>
   <% end %>
 </div>

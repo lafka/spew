@@ -81,21 +81,22 @@ defmodule SpewApplianceTest do
     # Check that when no runtime specified
     {:ok, app} = Appliance.add "no-runtime", nil, %{}, true
     assert nil == app.runtime
+    assert nil == app.builds.()
 
     # Add specific runtimes
     runtimeref = "i'm-a-build"
     {:ok, app} = Appliance.add "concrete-runtime", {:ref, runtimeref}, %{}, true
-    assert [runtimeref] == app.runtime.()
+    assert [runtimeref] == app.builds.()
 
     runtimerefs = ["so", "many", "builds"]
     {:ok, app} = Appliance.add "concrete-runtimes", {:ref, runtimerefs}, %{}, true
-    assert runtimerefs == app.runtime.()
+    assert runtimerefs == app.builds.()
 
     # There is no runtime
     {:ok, app} = Appliance.add "no-find-runtime", {:query, "TARGET == 0"}, %{}, true
-    assert [] == app.runtime.()
+    assert [] == app.builds.()
 
     {:ok, app} = Appliance.add "find-runtime", {:query, "TARGET == 'dummy'"}, %{}, true
-    assert [{_ref, _spec} | _] = app.runtime.()
+    assert [{_ref, _spec} | _] = app.builds.()
   end
 end

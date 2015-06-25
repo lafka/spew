@@ -75,6 +75,7 @@ defmodule Spew.Appliance do
       ref: nil,                             # the actual id of the appliance
       name: nil,                            # string()
       runtime: {:query, ""},                # {:query, ""} | {:ref, _} | [ref()]
+      builds: [],                           # list of possible builds
       instance: %Spew.Instance.Item{        # defaults is merged with instance cfg
         runner: Spew.Runner.Systemd,
         supervision: false,
@@ -83,6 +84,7 @@ defmodule Spew.Appliance do
         mounts: [],
         env: []
       },
+      hosts: [],                            # list of hosts which have defined this appliance
       enabled?: true
     ]
   end
@@ -148,12 +150,13 @@ defmodule Spew.Appliance do
             name: name,
             runtime: runtime,
             instance: Map.merge(%Item{}.instance, instance),
-            enabled?: enabled?
+            enabled?: enabled?,
+            hosts: [node]
           }
 
           ref = Utils.hash appliance
           appliance = %{appliance | ref: ref,
-                                    runtime: normalize_runtime(runtime)}
+                                    builds: normalize_runtime(runtime)}
 
           {:reply,
             {:ok, appliance},
@@ -294,7 +297,8 @@ defmodule Spew.Appliance do
         val = Map.merge %Item{}, cfg
 
         val = %{val | ref: ref,
-                      runtime: normalize_runtime(val.runtime)}
+                      hosts: [node],
+                      builds: normalize_runtime(val.runtime)}
 
         files = Map.put files, file, [ref | files[file] || []]
         apps = Map.put_new apps, ref, val
@@ -303,12 +307,12 @@ defmodule Spew.Appliance do
       end
     end
 
-    defp normalize_runtime(nil), do: nil
+    defp normalize_runtime(nil), do: fn -> nil end
     defp normalize_runtime({:ref, ref}) when not is_list(ref), do: fn -> [ref] end
     defp normalize_runtime({:ref, refs}), do: fn -> refs end
     defp normalize_runtime({:query, query}), do: fn ->
       {:ok, builds} = Spew.Build.list
-      q = ExQuery.Query.from_string(query)
+      q = ExQuery.Query.from_string query, Spew.Build.Item
       Enum.filter builds, fn({_ref, spec}) -> q.(spec) end
     end
   end

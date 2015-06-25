@@ -18,39 +18,54 @@
     </span>
   </div>
 
-  <h1>Build: <%= @params["build"] %></h1>
+  <h1>Build: <%= @build.target %> &ndash; <small><%= @params["build"] %></small></h1>
 
   <div>
-    <div class="page-header">
-      Build meta
-    </div>
-
     <dl class="dl-horizontal">
-      <%= for {k, v} <- @build do %>
-      <dt><%= k %></dt>
-      <dd><%= v %></dd>
-      <%= end %>
+      <% info = expand_build @build %>
+      <dt>Name:</dt>
+      <dd><%= @build.name %></dd>
+
+      <dt>Version:</dt>
+      <dd><%= @build.vsn %></dd>
+
+      <dt>Type:</dt>
+      <dd><%= @build.type %></dd>
+
+      <dt>Available on hosts:</dt>
+      <dd>
+        <%= for host <- @build.hosts do %>
+          <a href="/host/<%= host %>"><%= host %></a>, 
+        <% end %>
+      </dd>
+
+      <dt>Defined in appliances:</dt>
+      <dd>
+        <%= if [] == info[:appliances][:defined] do %>
+          None
+        <% else %>
+          <%= for appliance <- info[:appliances][:defined] do %>
+          <a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a>, 
+          <% end %>
+        <% end %>
+      </dd>
+
+      <dt>Usable by appliances:</dt>
+      <dd>
+        <%= if [] == info[:appliances][:usable] do %>
+          None
+        <% else %>
+          <%= for appliance <- info[:appliances][:usable] do %>
+          <a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a>, 
+          <% end %>
+        <% end %>
+      </dd>
+
+      <dt>Build Spec</dt>
+      <dd>
+        <pre><%= for {k, v} <- @build.spec do %>
+<%= k %> := <%= v %><% end %>
+      </dd>
     </dl>
-  </div>
-
-  <div>
-    <div class="page-header">
-      Appliances
-    </div>
-    @todo
-  </div>
-
-  <div>
-    <div class="page-header">
-      Intances
-    </div>
-    @todo
-  </div>
-
-  <div>
-    <div class="page-header">
-      Hosts
-    </div>
-    @todo
   </div>
 </div>

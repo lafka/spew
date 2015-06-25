@@ -4,6 +4,9 @@ defmodule Spewbuild do
   running
   """
 
+  require Logger
+
+
   @doc """
   Find all builds
 
@@ -19,8 +22,10 @@ defmodule Spewbuild do
     end
 
     spewpath = spewpath || Application.get_env(:spew, :buildpath) || []
+    Logger.debug "builds: scanning #{pattern} in #{inspect spewpath}"
+
     Enum.flat_map(spewpath, fn(path) ->
-      globpath = Path.join([path, pattern, "**", "*.tar"]) |> Path.expand
+      globpath = Path.join([path, pattern, "**", "*.{tar,tar.gz}"]) |> Path.expand
       paths = Path.wildcard(globpath)
       Enum.map paths, &buildinfo/1
     end) |> Enum.into %{}

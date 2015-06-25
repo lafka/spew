@@ -22,17 +22,15 @@
         <div class="appliance">
           <div class="col-xs-7">
             <h4><a href="/appliance/<%= appliance.ref %>"><%= appliance.name %></a></h4>
-            <span class="type"><%= appliance.instance.runner %></span>;
-            using <code class="runtime"><%= appliance.runtime %></code>
-          </div>
-          <div class="col-xs-5">
-            <%= if appliance.enabled? do %>
-              <a href="#" class="btn btn-sm btn-warning">Disable</a>
-            <% else %>
-              <a href="#" class="btn btn-sm btn-success">Enable</a>
-            <% end %>
-            <a href="#" class="btn btn-sm btn-primary">Spawn instance</a>
-            <a href="#" class="btn btn-sm btn-danger">Delete</a>
+            <span class="type"><%= appliance.instance.runner %></span><br>
+            <b>with runtime: </b>
+              <code class="runtime"><%= inspect appliance.runtime %></code><br>
+            <b>matching builds: </b>
+              <ul>
+                <%= for {ref, build} <- appliance.builds.() do %>
+                  <li><a href="/build/<%= ref %>"><%= build.target %></a></li>
+                <% end %>
+              </ul>
           </div>
         </div>
       </div>

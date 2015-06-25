@@ -22,8 +22,24 @@
     <dt>Ref</dt>
     <dd><%= @appliance.ref %></dd>
 
-    <dt>Build</dt>
-    <dd><%= buildinfo @appliance.appliance %></dd>
+    <% runtime =  runtimeinfo @appliance.runtime, @appliance.builds %>
+    <dt>Runtime</dt>
+    <dd>
+      <%= if runtime[:type] == :query do %>
+        Query: <code><%= runtime[:query] %></code><br>
+      <% end %>
+    </dd>
+
+    <dt>Builds</dt>
+    <dd>
+      <%= if [] == runtime[:builds] do %>
+        No builds available
+      <% else %>
+        <%= for build <- runtime[:builds] do %>
+          <a href="/build/<%= build.ref %>"><%= build.target %></a>
+        <% end %>
+      <% end %>
+    </dd>
 
     <dt>Runner Options</dt>
     <dd>

@@ -1,6 +1,6 @@
 %{"cowboy": {:hex, :cowboy, "1.0.0"},
   "cowlib": {:hex, :cowlib, "1.0.1"},
-  "exquery": {:git, "git://github.com/lafka/exquery.git", "0699efab83f02d009d7456d98d8eac70156c031d", []},
+  "exquery": {:git, "git://github.com/lafka/exquery.git", "7a8bd5855a68d95b5958e2a5a2d3e93286c0b3f0", []},
   "fs": {:hex, :fs, "0.9.2"},
   "phoenix": {:hex, :phoenix, "0.13.1"},
   "phoenix_html": {:hex, :phoenix_html, "1.2.1"},

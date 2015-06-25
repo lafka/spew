@@ -9,7 +9,7 @@ defmodule Spewpanel.BuildController do
     {:ok, tree} = Spew.Build.query "", true
     {:ok, builds} = Spew.Build.list
 
-    q = ExQuery.Query.from_string(query)
+    q = ExQuery.Query.from_string query, Spew.Build.Item
     builds = Enum.filter builds, fn({k, e}) -> match? = q.(e) end
 
     render conn, "index.html", builds: builds,

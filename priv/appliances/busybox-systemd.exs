@@ -1,6 +1,6 @@
 %{
   name: "busybox-systemd",
-  runtime: "TARGET == 'busybox'",
+  runtime: {:query, "name == 'busybox'"},
   instance: %{
     runner: Spew.Runner.Systemd,
     command: "/bin/busybox sh"

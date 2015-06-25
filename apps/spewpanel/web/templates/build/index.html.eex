@@ -3,10 +3,10 @@
 
   <ul class="nav">
   <%= for {name, targets} <- @tree do %>
-    <li><a href="/build?query=TARGET == '<%= name %>'"><%= name %></a></li>
+    <li><a href="/build?query=name == '<%= name %>'"><%= name %></a></li>
     <ul class="nav nav-child">
     <%= for {vsn, _} <- targets do %>
-      <li><a href="/build?query=TARGET == '<%= name %>' and VSN == '<%= vsn %>'"><%= vsn %></a></li>
+      <li><a href="/build?query=target == '<%= name %>/<%= vsn %>'"><%= vsn %></a></li>
     <%= end %>
     </ul>
   <%= end %>
@@ -26,27 +26,16 @@
   </div>
 
   <%= for {ref, build} <- Enum.slice(@builds, 0, 10) do %>
-    <div class="row">
-      <div class="container-fluid">
-        <div class="build">
-          <div class="col-xs-9">
-            <h4><a href="/build/<%= ref %>"><%= build["TARGET"] %>/<%= build["VSN"] %> - <%= ref %></a></h4>
+    <div class="build">
+      <h4><a href="/build/<%= ref %>"><%= build.target %> - <%= ref %></a></h4>
 
-             <p class="meta">
-              <span class="type"><%= build["TYPE"] %></span>;
-              buildt <span class="date"><%= build["BUILDDATE"] %>;
-              hosted by <span class="host"><%= build["HOST"] %></span>
-            </p>
-          </div>
-          <div class="col-xs-3">
-            <ul>
-              <li>Appliances: 0; <a href="">+ create</a></li>
-              <li>Instances: 0; <a href="">+ run</a></li>
-              <li>Hosts: 0; <a href="">+ deploy</a<</li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      <ul>
+        <% info = expand_build build %>
+        <li>Defined in <%= length info[:appliances][:defined] %> appliance(s)</li>
+        <li>Usable by <%= length info[:appliances][:usable] %> appliance(s)</li>
+        <li>Instances: @todo</li>
+        <li>Deployed to <%= length build.hosts %> host(s)</li>
+      </ul>
     </div>
   <%= end %>
 </div>

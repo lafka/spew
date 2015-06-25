@@ -3,7 +3,7 @@
   <h5>Hosts</h4>
 
   <ul>
-  <%= for host <- hosts do %>
+  <%= for host <- @hosts do %>
     <li><a href="/host/<%= host[:name] %>"><%= host[:name] %></a></li>
   <% end %>
   </ul>

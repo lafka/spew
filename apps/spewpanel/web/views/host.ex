@@ -1,10 +1,6 @@
 defmodule Spewpanel.HostView do
   use Spewpanel.Web, :view
 
-  def hosts(q \\ []) do
-    Spew.Host.query q
-  end
-
   def ip_to_string({mask,_}), do: ip_to_string(mask)
   def ip_to_string({a,b,c,d}), do: Enum.join([a,b,c,d], ".")
   def ip_to_string({a, b, c, d, e, f, g, h}) do
