@@ -93,10 +93,10 @@ defmodule SpewApplianceTest do
     assert runtimerefs == app.builds.()
 
     # There is no runtime
-    {:ok, app} = Appliance.add "no-find-runtime", {:query, "TARGET == 0"}, %{}, true
+    {:ok, app} = Appliance.add "no-find-runtime", {:query, "target == 0"}, %{}, true
     assert [] == app.builds.()
 
-    {:ok, app} = Appliance.add "find-runtime", {:query, "TARGET == 'dummy'"}, %{}, true
+    {:ok, app} = Appliance.add "find-runtime", {:query, "name == 'dummy'"}, %{}, true
     assert [{_ref, _spec} | _] = app.builds.()
   end
 end
