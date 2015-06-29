@@ -78,11 +78,11 @@ defmodule Spew.Appliance do
       builds: [],                           # list of possible builds
       instance: %Spew.Instance.Item{        # defaults is merged with instance cfg
         runner: Spew.Runner.Systemd,
-        supervision: false,
         network: [],
-        rootfs: {nil, nil},
+        runtime: nil,
         mounts: [],
-        env: []
+        env: [],
+        plugin: []
       },
       hosts: [],                            # list of hosts which have defined this appliance
       enabled?: true

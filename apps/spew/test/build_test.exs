@@ -58,7 +58,7 @@ defmodule BuildTest do
     {:ok, server} = Server.start_link name: __MODULE__,
                                       init: [pattern: "*/*",
                                              searchpath: []]
-    assert {:ok, %{}} == Build.query server
+    assert {:ok, %{}} == Build.query "", true, server
 
 
     {:ok, %Item{} = build1} = Build.add  %Item{ref: Spew.Utils.hash("query-1"),
