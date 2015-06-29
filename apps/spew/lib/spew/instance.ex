@@ -18,7 +18,7 @@ defmodule Spew.Instance do
       ref: nil,                       # string()
       name: nil,                      # string()
       appliance: nil,                 # the appliance ref
-      runner: Spew.Runner.Systemd,    # module()
+      runner: Spew.Runner.Port,       # module()
       command: nil,                   # string()
       network: [],                    # [{:bridge, :tm} | :veth]
       runtime: nil,                   # build used by instance
@@ -28,9 +28,7 @@ defmodule Spew.Instance do
       plugin_opts: [ # stores the initial plugin options the instance is called with
                 # this is converted to a map where the options will be
                 # stored in __init__
-          Supervision: false,         # Disable supervision by default
           Discovery: [],              # Argument options to discovery
-          Log: false,                 # Disable log by default
           Console: []                 # Enable console by default
       ],
       plugin: %{},
@@ -42,6 +40,7 @@ defmodule Spew.Instance do
     """
     def runnable?(%Item{runner: mod} = spec, optimistic? \\ false) do
       caps = mod.capabilities
+
       unsupported = Enum.filter_map Map.to_list(spec),
         fn({k, v}) ->
           true !== supports? k, v, Enum.member?(caps, k)
@@ -58,7 +57,12 @@ defmodule Spew.Instance do
       appliance? = appliance? spec.appliance
       build? = build? spec.runtime
 
+      runnersupport = mod.supported?
+
       case unsupported do
+        _ when not runnersupport ->
+          {:error, {:runner, runnersupport}}
+
         [] when optimistic? or (true === appliance? and true === build?) ->
           case nil == spec.appliance || Spew.Appliance.get spec.appliance do
             true -> # in case spec.appliance := nil
@@ -109,13 +113,14 @@ defmodule Spew.Instance do
           {:error, {:invalid_plugins, Enum.map(plugins, &(:"Elixir.Spew.Instance.#{&1}"))}}
       end
     end
+    defp supports?(opt, _plugins, true), do: true
     defp supports?(opt, _plugins, _cap?), do: {:error, {:invalid_option, opt}}
 
     @doc """
     Runs the instance
     """
-    def run(spec) do
-      spec.runner.run spec
+    def run(spec, opts \\ []) do
+      spec.runner.run spec, opts
     end
 
     @doc """
@@ -136,13 +141,15 @@ defmodule Spew.Instance do
     end
 
     @doc """
-    Subscribe to instance events
-
-    Doing this should enable the caller to receive messages like
-    `{:log, instancref, {:stdin | :stdout, buf}}` and `{:exit, instanceref, reason}`
-    messags.
+    Subscribe to the output process of the instance
     """
-    def subscribe, do: :ok = {:error, :notimplemented}
+    def subscribe(spec) do
+      spec.runner.subscribe spec, self
+    end
+
+    def write(spec, buf \\ []) do
+      spec.runner.write spec, buf
+    end
   end
 
   @name __MODULE__.Server
@@ -220,8 +227,8 @@ defmodule Spew.Instance do
   @doc """
   Run a transient instance
   """
-  def run(%Item{} = spec, server \\ @name), do:
-    GenServer.call(server, {:run, spec})
+  def run(%Item{} = spec, opts \\ [], server \\ @name), do:
+    GenServer.call(server, {:run, spec, opts})
 
   @doc """
   Stop a instance
@@ -422,20 +429,26 @@ defmodule Spew.Instance do
         {:reply, {:error, e}, state}
     end
 
-    def handle_call({:start, ref, _opts}, from, state) do
+    def handle_call({:start, ref, opts}, from, state) do
       case state.instances[ref] do
         nil ->
           {:reply, {:error, {:notfound, {:instance, ref}}}, state}
 
         spec ->
-          handle_call {:run, spec}, from, state
+          handle_call {:run, spec, opts}, from, state
       end
     end
 
-    def handle_call({:run, spec}, _from, state) do
-      case Item.run(spec) do
+    def handle_call({:run, spec, opts}, _from, state) do
+      spec = if ! spec.ref do
+        %{spec | ref: Spew.Utils.hash(spec)}
+      else
+        spec
+      end
+
+      case Item.run(spec, opts) do
         {:ok, newspec} ->
-          case spec.runner.pid newspec do
+          case newspec.runner.pid newspec do
             {:ok, pid} ->
               instances = Map.put state.instances, newspec.ref, newspec
 

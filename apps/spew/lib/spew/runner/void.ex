@@ -9,10 +9,12 @@ defmodule Spew.Runner.Void do
     :plugin
   ]
 
+  def supported?, do: true
+
   def pid(%Item{plugin: %{__MODULE__ => %{pid: pid}}}), do: {:ok, pid}
   def pid(%Item{ref: ref}), do: {:error, {:no_pid, {:instance, ref}}}
 
-  def run(%Item{ref: ref} = spec) do
+  def run(%Item{ref: ref} = spec, _) do
     pid = spawn fn ->
       receive do
         {^ref, :stop} ->
