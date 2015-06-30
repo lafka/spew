@@ -1,10 +1,14 @@
 defmodule Spew do
   use Application
 
+  require Logger
+
   def start(_type, _args) do
     :ok = check_prereqs
 
     import Supervisor.Spec, warn: false
+
+    setup_network
 
     children = [
       worker(Spew.Host.Server, []),
@@ -14,6 +18,36 @@ defmodule Spew do
 
     opts = [strategy: :one_for_one, name: Spewhost.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  def setup_network do
+    setup? = false !== Application.get_env(:spew, :provision)[:auto_setup_networks]
+
+    if setup? do
+      networks = Map.keys Application.get_env(:spew, :provision)[:networks]
+      Enum.each networks, &(true = setup_network(&1))
+    else
+      Logger.info "network: not auto-configuring networks"
+    end
+  end
+  def setup_network(network) do
+    case Spew.Network.setupbridge network do
+      true ->
+        iface = Spew.Utils.Net.Iface.stats network
+        addrs = for {addr, opts} <- iface.addrs, do:
+          "  #{String.rjust("#{opts[:type]}:", 9)} #{addr}/#{opts[:netmask]}\n"
+
+        Logger.info """
+        network[#{network}]: configured:
+          mac: #{iface.hwaddr}
+          flags: #{inspect iface.flags}
+        #{addrs}
+        """
+        true
+
+      {:error, _} = err ->
+        Logger.error "network[#{network}]: failed to setup: #{inspect err}"
+    end
   end
 
   def root do

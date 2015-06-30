@@ -12,9 +12,12 @@ defmodule Spew.Utils.Net do
 
     defstruct name: nil,
               flags: [],
-              hwaddr: [],
+              hwaddr: nil,
               addrs: %{}
 
+    @doc """
+    Get network interface stats
+    """
     def stats(iface) do
       {:ok, ifaces} = :inet.getifaddrs
 

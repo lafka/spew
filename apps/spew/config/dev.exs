@@ -10,3 +10,14 @@ config :spew, :buildpath, [
   "#{Application.get_env(:spew, :spewroot)}/build",
   "~/.spew/builds"
 ]
+config :spew, :provision, [
+  domain: "spew.tm",
+  networks: %{
+    "spew" => %{
+      range: [
+        "172.20.0.0/16#25",
+        "fc00:3000:3::0/64#100"
+      ]
+    }
+  }
+]
