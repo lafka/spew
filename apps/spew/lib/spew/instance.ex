@@ -5,10 +5,9 @@ defmodule Spew.Instance do
   """
 
   defmodule Item do
-    alias Spew.Instance.Supervision
-    alias Spew.Instance.Discovery
-    alias Spew.Instance.Log
-    alias Spew.Instance.Consol
+    alias Spew.InstancePlugin
+    alias Spew.InstancePlugin.Discovery
+    alias Spew.InstancePlugin.Console
 
     alias __MODULE__, as: Item
 
@@ -25,12 +24,12 @@ defmodule Spew.Instance do
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
       state: {:starting, {0, 0, 0}, nil},   # {state(), now()}
-      plugin_opts: [ # stores the initial plugin options the instance is called with
+      plugin_opts: %{ # stores the initial plugin options the instance is called with
                 # this is converted to a map where the options will be
                 # stored in __init__
-          Discovery: [],              # Argument options to discovery
-          Console: []                 # Enable console by default
-      ],
+          Discovery => [],              # Argument options to discovery
+          Console => []                 # Enable console by default
+      },
       plugin: %{},
       tags: []                       # [tag, ..]
     ]
@@ -312,6 +311,8 @@ defmodule Spew.Instance do
     @name __MODULE__
 
     defmodule State do
+      alias Spew.InstancePlugin
+
       defstruct instances: %{},
                 subscriptions: %{},
                 monitors: %{}
@@ -341,9 +342,18 @@ defmodule Spew.Instance do
       end
 
       @doc """
-      Notify some event to subscribers
+      Notify some event to subscribers, and update plugins for any
+      instances involved.
       """
       def notify(state, ref, event) do
+        state = case InstancePlugin.event state.instances[ref], event do
+          :ok ->
+            state
+
+          {:update, spec} ->
+            %{state | instances: Map.put(state.instances, ref, spec)}
+        end
+
         Enum.each state.subscriptions, fn({_ref, {who, match}}) ->
           if match.({:ev, ref, event}) do
             send who, {:ev, ref, event}
@@ -373,7 +383,11 @@ defmodule Spew.Instance do
           spec = %{spec | ref: ref = Spew.Utils.hash(spec)}
           instances = Map.put state.instances, ref, spec
 
-          {:reply, {:ok, spec}, %{state | instances: instances}}
+          {:ok, state} = State.notify %{state | instances: instances},
+                                      spec.ref,
+                                      :add
+
+          {:reply, {:ok, state.instances[ref]}, state}
 
         true when hasinstance? ->
           {:reply, {:error, {:conflict, {:instance, spec.ref}}}, state}
@@ -399,6 +413,7 @@ defmodule Spew.Instance do
           {:reply, {:error, {:notfound, {:instance, ref}}}, state}
 
         _ ->
+          {:ok, state} = State.notify state, ref, :delete
           {:reply, :ok, %{state | instances: Map.delete(state.instances, ref)}}
       end
     end
@@ -447,17 +462,20 @@ defmodule Spew.Instance do
       end
 
       case Item.run(spec, opts) do
-        {:ok, newspec} ->
+        {:ok, %Item{ref: ref} = newspec} ->
           case newspec.runner.pid newspec do
             {:ok, pid} ->
               instances = Map.put state.instances, newspec.ref, newspec
+              {:ok, state} = State.notify %{state | instances: instances},
+                                          spec.ref,
+                                          :start
 
               monref = Process.monitor pid
               monitors = Map.put state.monitors, {pid, monref}, spec.ref
 
-              {:reply, {:ok, newspec}, %{state |
-                                          monitors: monitors,
-                                          instances: instances}}
+              {:reply, {:ok, state.instances[ref]}, %{state |
+                                                      monitors: monitors,
+                                                      instances: instances}}
 
             {:error, _err} = err  ->
               {:reply, err, state}
@@ -477,7 +495,11 @@ defmodule Spew.Instance do
           case Item.stop(spec) do
             {:ok, newspec} ->
               instances = Map.put state.instances, newspec.ref, newspec
-              {:reply, {:ok, newspec}, %{state | instances: instances}}
+              {:ok, state} = State.notify %{state | instances: instances},
+                                          spec.ref,
+                                          {:stopping, signal}
+
+              {:reply, {:ok, state.instances[ref]}, state}
 
             {:error, _} = res ->
               {:reply, res, state}
@@ -494,7 +516,11 @@ defmodule Spew.Instance do
           case Item.kill(spec) do
             {:ok, newspec} ->
               instances = Map.put state.instances, newspec.ref, newspec
-              {:reply, {:ok, newspec}, %{state | instances: instances}}
+              {:ok, state} = State.notify %{state | instances: instances},
+                                          spec.ref,
+                                          :killing
+
+              {:reply, {:ok, state.instances[ref]}, state}
 
             {:error, _} = res ->
               {:reply, res, state}
@@ -526,10 +552,12 @@ defmodule Spew.Instance do
 
           spec = state.instances[instanceref]
           spec = %{spec | state: {reason, :erlang.now}}
-
-          {:ok, state} = State.notify state, spec.ref, {:stop, reason}
-
           instances = Map.put state.instances, spec.ref, spec
+
+          {:ok, state} = State.notify %{state | instances: instances},
+                                      spec.ref,
+                                      {:stop, reason}
+
           monitors = Map.delete state.monitors, {pid, monref}
 
           {:noreply, %{state |
@@ -538,7 +566,7 @@ defmodule Spew.Instance do
       end
     end
 
-    defp map_down_reason(:normal), do: :stopped
+    defp map_down_reason(:normal), do: :normal
     defp map_down_reason(:killed), do: :killed
     defp map_down_reason(reason), do: {:crashed, reason}
   end

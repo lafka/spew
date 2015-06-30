@@ -53,4 +53,9 @@ defmodule Spew.Runner.Void do
   end
   def kill(%Item{ref: ref, state: {_, _, _pid}}), do:
     {:error, {:no_pid, {:instance, ref}}}
+
+  @doc """
+  Handle events from InstancePlugin
+  """
+  def event(_instance, state, _ev), do: state
 end
