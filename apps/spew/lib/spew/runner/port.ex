@@ -7,6 +7,7 @@ defmodule Spew.Runner.Port do
 
   require Logger
 
+  alias Spew.Utils.Time
   alias Spew.Instance.Item
 
   def capabilities, do: [
@@ -45,35 +46,58 @@ defmodule Spew.Runner.Port do
   def run(%Item{ref: ref, command: nil} = spec, _opts), do:
     {:error, {:empty_command, {:instance, ref}}}
   def run(%Item{ref: ref, command: [cmd | args]} = spec, opts) do
-    Logger.debug "runner/port: exec #{cmd} #{inspect args}"
+    Logger.debug "runner/port: exec #{cmd} #{List.flatten(args) |> Enum.join(" ")}"
 
     case System.find_executable cmd do
       nil ->
         {:error, {:enoent, cmd, {:instance, ref}}}
 
       cmd ->
-        {parent, ref} = {self, make_ref}
+        {parent, retref} = {self, make_ref}
         {pid, monref} = spawn_monitor fn ->
+          Process.flag :trap_exit, true
+
+          IO.inspect args
           port = Port.open {:spawn_executable, cmd}, [{:args, args},
                                                       :exit_status,
                                                       :use_stdio,
                                                       :stderr_to_stdout,
                                                       :binary]
 
-          send parent, {ref, :ok, port}
-
-          Process.flag :trap_exit, true
-          portproxy spec.ref, port
+          receive do
+            {^port, {:exit_status, 0}} -> collect_and_exit port, {parent, retref}, :normal
+            {^port, {:exit_status, n}} -> collect_and_exit port, {parent, retref}, {:crashed, 1}
+            {:EXIT, ^port, :normal}    -> collect_and_exit port, {parent, retref}, :normal
+            {:EXIT, ^port, reason}     -> collect_and_exit port, {parent, retref}, reason
+          after
+            # catch startup errors
+            250 ->
+              send parent, {retref, :ok, port}
+              portproxy spec.ref, port
+          end
         end
 
         receive do
-          {^ref, :ok, port} ->
+          {^retref, :ok, port} ->
             Enum.each opts[:subscribe] || [], &(send pid, {:subscribe, {&1, make_ref}})
             plugins = Map.put spec.plugin, __MODULE__, %{port: port,
                                                          pid: pid}
+
             {:ok, %{spec |
-                      state: {:running, :erlang.now},
+                      state: {:running, Time.now(:milli_seconds)},
                       plugin: plugins}}
+
+          {^retref, {:initexit, :normal}, buf} ->
+            Enum.each buf, fn(line) ->
+              Enum.each opts[:subscribe] || [], &(send &1, {:output, ref, line})
+            end
+
+            plugins = Map.put spec.plugin, __MODULE__, %{pid: pid}
+            {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)},
+                           plugin: plugins}}
+
+          {^retref, {:initexit, reason}, buf} ->
+            {:error, {:initexit, reason, buf, {:instance, ref}}}
 
           {:DOWN, ^monref, :process, ^pid, reason} ->
             {:error, {:portexit, reason, {:instance, ref}}}
@@ -82,6 +106,17 @@ defmodule Spew.Runner.Port do
   end
   def run(%Item{ref: ref} = spec, _opts), do:
     {:error, {:invalid_command, {:instance, ref}}}
+
+  defp collect_and_exit(port, from, reason), do: collect_and_exit(port, from, reason, [])
+  defp collect_and_exit(port, {who, ref} = from, reason, acc) do
+    receive do
+      {^port, {:data, buf}} ->
+        collect_and_exit port, from, reason, [buf | acc]
+    after 10 ->
+      send who, {ref, {:initexit, reason}, Enum.reverse(acc)}
+      exit(reason)
+    end
+  end
 
   defp portproxy(ref, port), do: portproxy(ref, port, %{})
   defp portproxy(ref, port, subscribers) do
@@ -168,16 +203,16 @@ defmodule Spew.Runner.Port do
 
     receive do
       {^returnref, :stopping} ->
-        {:ok, %{spec | state: {:stopping, :erlang.now}}}
+        {:ok, %{spec | state: {:stopping, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, :normal} ->
-        {:ok, %{spec | state: {:stopped, :erlang.now}}}
+        {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, :noproc} ->
-        {:ok, %{spec | state: {:stopped, :erlang.now}}}
+        {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, reason} ->
-        {:ok, %{spec | state: {{:crashed, reason}, :erlang.now}}}
+        {:ok, %{spec | state: {{:crashed, reason}, Time.now(:milli_seconds)}}}
     end
   end
   def stop(%Item{ref: ref} = spec, _signal) do
@@ -194,16 +229,16 @@ defmodule Spew.Runner.Port do
 
     receive do
       {^returnref, :stopping} ->
-        {:ok, %{spec | state: {:killing, :erlang.now}}}
+        {:ok, %{spec | state: {:killing, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, :normal} ->
-        {:ok, %{spec | state: {:killing, :erlang.now}}}
+        {:ok, %{spec | state: {:killing, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, :noproc} ->
-        {:ok, %{spec | state: {:stopped, :erlang.now}}}
+        {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
       {:DOWN, monref, :process, ^pid, reason} ->
-        {:ok, %{spec | state: {{:crashed, reason}, :erlang.now}}}
+        {:ok, %{spec | state: {{:crashed, reason}, Time.now(:milli_seconds)}}}
     end
   end
   def kill(%Item{ref: ref, state: {_, _, _pid}}), do:

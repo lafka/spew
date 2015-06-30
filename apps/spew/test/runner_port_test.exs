@@ -12,7 +12,8 @@ defmodule RunnerPortTest do
 
     {:ok, instance} = Instance.run spec, [subscribe: [self]], server
 
-    assert {:running, _} = instance.state
+    # Instance should have terminated and stopped immediately
+    assert {:stopped, _} = instance.state
 
     ref = instance.ref
     receive do
@@ -36,7 +37,7 @@ defmodule RunnerPortTest do
       {:output, ^ref, "pid: " <> extpid} ->
           extpid
     after 5000 ->
-      raise :timeout
+      exit(:no_output)
     end
 
     monref = Process.monitor instance.plugin[Runner][:pid]

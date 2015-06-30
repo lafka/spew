@@ -18,12 +18,12 @@ defmodule Spew.Instance do
       name: nil,                      # string()
       appliance: nil,                 # the appliance ref
       runner: Spew.Runner.Port,       # module()
-      command: nil,                   # string()
+      command: nil,                   # iolist()
       network: [],                    # [{:bridge, :tm} | :veth]
-      runtime: nil,                   # build used by instance
+      runtime: nil,                   # {:build, build} | {:chroot,a dir}
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
-      state: {:starting, {0, 0, 0}, nil},   # {state(), now()}
+      state: {:starting, 0},          # {state(), now()}
       plugin_opts: %{ # stores the initial plugin options the instance is called with
                 # this is converted to a map where the options will be
                 # stored in __init__
@@ -85,6 +85,7 @@ defmodule Spew.Instance do
     defp appliance?(nil), do: true
 
 
+    defp supports?(k, v, hascap?, _allcaps), do: supports?(k, v, hascap?)
     defp supports?(:__struct__, _, _cap?), do: true
     defp supports?(:ref, _, _cap?), do: true
     defp supports?(:name, _, _cap?), do: true
@@ -551,7 +552,7 @@ defmodule Spew.Instance do
           Logger.debug "instance[#{instanceref}]: exit -> #{inspect reason}"
 
           spec = state.instances[instanceref]
-          spec = %{spec | state: {reason, :erlang.now}}
+          spec = %{spec | state: {reason, Spew.Utils.Time.now(:milli_seconds)}}
           instances = Map.put state.instances, spec.ref, spec
 
           {:ok, state} = State.notify %{state | instances: instances},
@@ -564,6 +565,11 @@ defmodule Spew.Instance do
                         instances: instances,
                         monitors: monitors }}
       end
+    end
+
+    def handle_info(ev, state) do
+      Logger.warn "instance: unexpected msg: #{inspect ev}"
+      {:noreply, state}
     end
 
     defp map_down_reason(:normal), do: :normal

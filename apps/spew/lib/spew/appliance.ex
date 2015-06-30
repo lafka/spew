@@ -77,12 +77,11 @@ defmodule Spew.Appliance do
       runtime: {:query, ""},                # {:query, ""} | {:ref, _} | [ref()]
       builds: [],                           # list of possible builds
       instance: %Spew.Instance.Item{        # defaults is merged with instance cfg
-        runner: Spew.Runner.Systemd,
+        runner: Spew.Runner.SystemdNspawn,
         network: [],
         runtime: nil,
         mounts: [],
-        env: [],
-        plugin: []
+        env: %{}
       },
       hosts: [],                            # list of hosts which have defined this appliance
       enabled?: true

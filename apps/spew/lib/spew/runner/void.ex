@@ -4,6 +4,7 @@ defmodule Spew.Runner.Void do
   """
 
   alias Spew.Instance.Item
+  alias Spew.Utils.Time
 
   def capabilities, do: [
     :plugin
@@ -23,7 +24,7 @@ defmodule Spew.Runner.Void do
     end
     plugins = Map.put spec.plugin, __MODULE__, %{pid: pid}
     {:ok, %{spec |
-              state: {:running, :erlang.now},
+              state: {:running, Time.now(:milli_seconds)},
               plugin: plugins}}
   end
 
@@ -41,7 +42,7 @@ defmodule Spew.Runner.Void do
     # just send it, if it's dead it should be monitored and we
     # should receive a :DOWN msg
     send pid, {ref, :stop}
-    {:ok, %{spec | state: {:stopping, :erlang.now}}}
+    {:ok, %{spec | state: {:stopping, Time.now(:milli_seconds)}}}
   end
   def stop(%Item{ref: ref} = spec, _signal) do
     {:error, {:no_pid, {:instance, ref}}}
@@ -49,7 +50,7 @@ defmodule Spew.Runner.Void do
 
   def kill(%Item{plugin: %{__MODULE__ => %{pid: pid}}} = spec) when is_pid(pid) do
     Process.exit pid, :kill
-    {:ok, %{spec | state: {:killing, :erlang.now}}}
+    {:ok, %{spec | state: {:killing, Time.now(:milli_seconds)}}}
   end
   def kill(%Item{ref: ref, state: {_, _, _pid}}), do:
     {:error, {:no_pid, {:instance, ref}}}
