@@ -23,6 +23,15 @@ defmodule Spew.Network do
   has some helper functions to setup the initial bridge, it does not
   make any assumptions on how addresses are delegated within that
   space but they can easily be passed on to a running instance
+
+  ## IP allocation & DNS
+
+  When a instance is created a IP address will be allocated either by
+  finding it in the `spewhosts` file or by randomly selecting a unused
+  address from the host network slice.
+
+  The spewhosts file can be bind mounted by a runner to provide unicast
+  lookup for hosts.
   """
 
   require Logger
@@ -66,7 +75,7 @@ defmodule Spew.Network do
 
             where = hash &&& (:erlang.trunc(:math.pow(2, size)) - 1)
 
-            {ipadd(ip, where <<< (spacesize(ip) - claim)), claim}
+            {InetAddress.increment(ip, where <<< (spacesize(ip) - claim)), claim}
         end
 
         {:ok, %{ranges: slices, iface: network[:iface] || network}}
@@ -92,25 +101,6 @@ defmodule Spew.Network do
 
   defp spacesize({_,_,_,_}), do: 32
   defp spacesize({_,_,_,_,_,_,_,_}), do: 128
-
-  defp ipadd({a, b, c, d}, where) do
-    <<a,b,c,d>> = (:binary.decode_unsigned(<<a,b,c,d>>) + where)
-                  |> :binary.encode_unsigned
-
-    {a, b, c, d}
-  end
-  defp ipadd({a, b, c, d, e, f, g, h}, where) do
-    <<a :: size(16), b :: size(16), c :: size(16),
-      d :: size(16), e :: size(16), f :: size(16),
-      g :: size(16), h :: size(16)>> =
-        (:binary.decode_unsigned(<<
-            a :: size(16), b :: size(16), c :: size(16),
-            d :: size(16), e :: size(16), f :: size(16),
-            g :: size(16), h :: size(16) >>) + where)
-          |> :binary.encode_unsigned
-
-    {a, b, c, d, e, f, g, h}
-  end
 
   @doc """
   Calls the correct system commands to setup the initial bridge
@@ -157,10 +147,11 @@ defmodule Spew.Network do
       {_, n} -> {:error, :linkup, {:exit, n}, {:iface, iface}}
     end
   end
-  defp configure_iface(iface, [{ip, mask} | slice]) do
-    address = :inet_parse.ntoa(ip)
+  defp configure_iface(iface, [{addr, mask} | slice]) do
+    addr = InetAddress.increment addr, 1
+    addr = :inet_parse.ntoa addr
 
-    case syscmd ["sudo", "ip", "addr", "add", "local", "#{address}/#{mask}", "dev", iface] do
+    case syscmd ["sudo", "ip", "addr", "add", "local", "#{addr}/#{mask}", "dev", iface] do
       {_, 0} -> configure_iface iface, slice
       {_, 2} -> configure_iface iface, slice
       {_, n} -> {:error, :addrset, {:exit, n}, {:iface, iface}}
@@ -175,6 +166,7 @@ defmodule Spew.Network do
 
       %Iface{addrs: addrmap, flags: flags} ->
         matched? = Enum.all? slices, fn({addr, mask}) ->
+          addr = InetAddress.increment addr, 1
           addr = InetAddress.to_string addr
           Map.has_key?(addrmap, addr) and addrmap[addr][:netmask] === mask
         end

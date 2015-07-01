@@ -129,5 +129,27 @@ defmodule Spew.Utils.Net do
         |> String.replace("0", "")
         |> byte_size
     end
+
+    @doc """
+    Increment an ip address by `n`, use negative number to reduce
+    """
+    def increment({a, b, c, d}, by) do
+      <<a,b,c,d>> = (:binary.decode_unsigned(<<a,b,c,d>>) + by)
+                    |> :binary.encode_unsigned
+
+      {a, b, c, d}
+    end
+    def increment({a, b, c, d, e, f, g, h}, by) do
+      <<a :: size(16), b :: size(16), c :: size(16),
+        d :: size(16), e :: size(16), f :: size(16),
+        g :: size(16), h :: size(16)>> =
+          (:binary.decode_unsigned(<<
+              a :: size(16), b :: size(16), c :: size(16),
+              d :: size(16), e :: size(16), f :: size(16),
+              g :: size(16), h :: size(16) >>) + by)
+            |> :binary.encode_unsigned
+
+      {a, b, c, d, e, f, g, h}
+    end
   end
 end
