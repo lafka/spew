@@ -31,7 +31,11 @@ defmodule Spew.Instance do
           Console => []                 # Enable console by default
       },
       plugin: %{},
-      tags: []                       # [tag, ..]
+      tags: [],                      # [tag, ..]
+      hooks: %{
+        start: [],
+        stop: []
+      }
     ]
 
     @doc """
@@ -93,6 +97,7 @@ defmodule Spew.Instance do
     defp supports?(:runner, _, _cap?), do: true
     defp supports?(:command, nil, _cap?), do: true
     defp supports?(:plugin_opts, _opts, _cap?), do: true
+    defp supports?(:hooks, _opts, _cap?), do: true
 
     defp supports?(:network, [], _cap?), do: true
     defp supports?(:runtime, nil, _cap?), do: true
@@ -462,28 +467,40 @@ defmodule Spew.Instance do
         spec
       end
 
-      case Item.run(spec, opts) do
-        {:ok, %Item{ref: ref} = newspec} ->
-          case newspec.runner.pid newspec do
-            {:ok, pid} ->
-              instances = Map.put state.instances, newspec.ref, newspec
-              {:ok, state} = State.notify %{state | instances: instances},
-                                          spec.ref,
-                                          :start
+      # Don't break on bad hooks
+      res = try do callbacks [spec], spec.hooks[:start]
+            catch e -> {:error, e} end
 
-              monref = Process.monitor pid
-              monitors = Map.put state.monitors, {pid, monref}, spec.ref
+      case res do
+        :ok ->
+          case Item.run(spec, opts) do
+            {:ok, %Item{ref: ref} = newspec} ->
+              case newspec.runner.pid newspec do
+                {:ok, pid} ->
+                  instances = Map.put state.instances, newspec.ref, newspec
 
-              {:reply, {:ok, state.instances[ref]}, %{state |
-                                                      monitors: monitors,
+                  {:ok, state} = State.notify %{state | instances: instances},
+                                              spec.ref,
+                                              :start
+
+                  instance = state.instances[ref]
+
+                  monref = Process.monitor pid
+                  monitors = Map.put state.monitors, {pid, monref}, spec.ref
+
+                  {:reply, {:ok, instance}, %{state | monitors: monitors,
                                                       instances: instances}}
 
-            {:error, _err} = err  ->
-              {:reply, err, state}
+                err ->
+                  {:reply, err, state}
+              end
+
+            {:error, _} = res ->
+               {:reply, res, state}
           end
 
-          {:error, _} = res ->
-            {:reply, res, state}
+        res ->
+          {:reply, res, state}
       end
     end
 
@@ -555,6 +572,13 @@ defmodule Spew.Instance do
           spec = %{spec | state: {reason, Spew.Utils.Time.now(:milli_seconds)}}
           instances = Map.put state.instances, spec.ref, spec
 
+          # we don't care about the result of the hooks, just don't crash
+          try do
+            callbacks [spec, reason], spec.hooks[:stop], false
+          catch
+            e -> {:error, e}
+          end
+
           {:ok, state} = State.notify %{state | instances: instances},
                                       spec.ref,
                                       {:stop, reason}
@@ -575,5 +599,24 @@ defmodule Spew.Instance do
     defp map_down_reason(:normal), do: :normal
     defp map_down_reason(:killed), do: :killed
     defp map_down_reason(reason), do: {:crashed, reason}
+
+    defp callbacks(args, funs), do: callbacks(args, funs, true)
+    defp callbacks(_args, [], _strict?), do: :ok
+    defp callbacks(args, [fun | rest], strict?) do
+      case apply fun, args do
+        :ok ->
+          callbacks args, rest, strict?
+
+        res ->
+          res
+      end
+    rescue e in BadArityError ->
+      if true === strict? do
+        {:error, {:callback, {:badarit, fun}}}
+      else
+        Logger.error "instance/callbacks: bad arity in #{inspect fun}"
+        callbacks args, rest, strict?
+      end
+    end
   end
 end

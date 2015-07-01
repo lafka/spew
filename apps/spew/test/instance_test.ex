@@ -92,4 +92,23 @@ defmodule SpewInstanceTest do
 
     assert {:error, {:notfound, {:instance, _ref}}} = Instance.get instance.ref, server
   end
+
+  test "hooks", ctx do
+    {:ok, server} = Server.start_link name: ctx[:test]
+    {:ok, agent} = Agent.start fn -> :waiting end
+
+    spec = %Item{runner: Void,
+                 hooks: %{
+                   start: [fn(_) -> Agent.update(agent, fn(_) -> :started end) end],
+                   stop: [fn(_, reason) -> Agent.update(agent, fn(_) -> reason end) end],
+                 }}
+
+    {:ok, instance} = Instance.run spec, [], server
+
+    assert :started = Agent.get agent, &(&1)
+
+    {:ok, instance} = Instance.stop instance.ref, [], server
+
+    assert :normal = Agent.get agent, &(&1)
+  end
 end
