@@ -45,7 +45,7 @@ defmodule Spew.Network do
   in config. This DOES NOT guarantee that the network slice is
   not already in use by any other hosts.
   """
-  def netslice(network, host \\ node) do
+  def range(network, host \\ node) do
     case Application.get_env(:spew, :provision)[:networks][network] do
       nil ->
         {:error, {:notfound, {:network, network}}}
@@ -122,7 +122,7 @@ defmodule Spew.Network do
   general sudo overuse in spew itself. could even put it in spewtils
   """
   def setupbridge(network, host \\ node) do
-    {:ok, net} = netslice network, host
+    {:ok, net} = range network, host
     case check_bridge net.iface, net.ranges do
       :notfound ->
         case create_bridge net.iface do
