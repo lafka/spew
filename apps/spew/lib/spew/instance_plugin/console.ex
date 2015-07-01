@@ -23,20 +23,20 @@ defmodule Spew.InstancePlugin.Console do
 
   alias __MODULE__.State
 
-  def handle(instance, {:init, _ref}) do
+  def event(instance, _state, {:init, _ref}) do
     {:update, %State{}}
   end
 
-  def handle(instance, {:output, _ref, buf}) do
+  def event(instance, _state, {:output, _ref, buf}) do
     {:update, State.append(instance.plugin[__MODULE__], buf)}
   end
 
-  def handle(instance, {:input, _ref, buf}) do
+  def event(instance, _state, {:input, _ref, buf}) do
     {:update, State.append(instance.plugin[__MODULE__], buf)}
   end
 
   # keep the console so we can scroll back
-  def handle(instance, {:exit, ref, _}), do: :ok
+  def event(instance, _state, {:exit, ref, _}), do: :ok
 
-  def handle(instance, _), do: :ok
+  def event(instance, _state, _ev), do: :ok
 end

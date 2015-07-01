@@ -8,15 +8,15 @@ defmodule Spew.InstancePlugin.Discovery do
 
   alias Spew.Discovery
 
-  def handle(instance, {:init, ref}) do
+  def event(instance, _state, {:init, ref}) do
     {:update, Spew.Discovery.item}
   end
 
-  def handle(instance, {:exit, ref, _}) do
+  def event(instance, _state, {:exit, ref, _}) do
     {:update, %{}}
   end
 
-  def handle(instance, _) do
+  def event(instance, _state, _ev) do
     :ok
   end
 end
