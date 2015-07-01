@@ -14,6 +14,7 @@ config :spew, :provision, [
   domain: "spew.tm",
   networks: %{
     "spew" => %{
+      iface: "spewdev",
       range: [
         "172.20.0.0/16#25",
         "fc00:3000:3::0/64#100"

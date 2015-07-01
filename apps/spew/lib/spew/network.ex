@@ -17,6 +17,8 @@ defmodule Spew.Network do
   cluster mode, and if so it will wait to spawn instances until it
   has been able to sync the network table with atleast one other node
 
+  ## Initial Network setup
+
   For convenience, and until the API is less vague, this module also
   has some helper functions to setup the initial bridge, it does not
   make any assumptions on how addresses are delegated within that
@@ -27,6 +29,7 @@ defmodule Spew.Network do
 
   use Bitwise
 
+  alias Spew.Utils.Net.Iface
   alias Spew.Utils.Net.InetAddress
 
   defmodule NetRangeException do
@@ -66,7 +69,7 @@ defmodule Spew.Network do
             {ipadd(ip, where <<< (spacesize(ip) - claim)), claim}
         end
 
-        {:ok, slices}
+        {:ok, %{ranges: slices, iface: network[:iface] || network}}
 
       _ ->
         {:error, {:input, :range_or_claim_missing, {:network, network}}}
@@ -119,72 +122,64 @@ defmodule Spew.Network do
   general sudo overuse in spew itself. could even put it in spewtils
   """
   def setupbridge(network, host \\ node) do
-    {:ok, slices} = netslice network, host
-    case check_bridge network, slices do
+    {:ok, net} = netslice network, host
+    case check_bridge net.iface, net.ranges do
       :notfound ->
-        case create_bridge(network) do
+        case create_bridge net.iface do
           true ->
-            configure_iface(network, slices)
+            configure_iface(net.iface, net.ranges)
 
           {:error, n} ->
-            {:error, {:createbr, {:exit, n}, {:network, network}}}
+            {:error, {:createbr, {:exit, n}, {:iface, net.iface}}}
         end
 
       :invalidcfg ->
-        Logger.warn "network[#{network}] bridge already exists but with invalid config, maybe its in use?"
-        configure_iface(network, slices)
+        Logger.warn "iface[#{net.iface}] bridge already exists but with invalid config, maybe its in use?"
+        configure_iface(net.iface, net.ranges)
 
       :ok ->
         # Ensure iface is up
-        configure_iface network, []
+        configure_iface net.iface, []
     end
   end
 
-  defp create_bridge(name) do
-    case System.cmd System.find_executable("sudo"),
-                    ["brctl", "addbr", name],
-                    [stderr_to_stdout: true] do
+  defp create_bridge(iface) do
+    case syscmd ["sudo", "brctl", "addbr", iface] do
 
       {_, 0} -> true
       {_, n} -> {:error, n}
     end
   end
 
-  defp configure_iface(network, []) do
-    case System.cmd System.find_executable("sudo"),
-                    ["ip", "link", "set", "up", "dev", network],
-                    [stderr_to_stdout: true] do
+  defp configure_iface(iface, []) do
+    case syscmd ["sudo", "ip", "link", "set", "up", "dev", iface] do
       {_, 0} -> true
-      {_, n} -> {:error, :linkup, {:exit, n}, {:network, network}}
+      {_, n} -> {:error, :linkup, {:exit, n}, {:iface, iface}}
     end
   end
-  defp configure_iface(network, [{ip, mask} | slice]) do
+  defp configure_iface(iface, [{ip, mask} | slice]) do
     address = :inet_parse.ntoa(ip)
 
-    case System.cmd System.find_executable("sudo"),
-                    ["ip", "addr", "add", "local", "#{address}/#{mask}", "dev", network],
-                    [stderr_to_stdout: true] do
-
-      {_, 0} -> configure_iface network, slice
-      {_, 2} -> configure_iface network, slice
-      {_, n} -> {:error, :addrset, {:exit, n}, {:network, network}}
+    case syscmd ["sudo", "ip", "addr", "add", "local", "#{address}/#{mask}", "dev", iface] do
+      {_, 0} -> configure_iface iface, slice
+      {_, 2} -> configure_iface iface, slice
+      {_, n} -> {:error, :addrset, {:exit, n}, {:iface, iface}}
     end
   end
 
-  defp check_bridge(network, slices) do
+  defp check_bridge(iface, slices) do
     {:ok, ifaces} = :inet.getifaddrs
-    case List.keyfind ifaces, '#{network}', 0 do
-      nil ->
+    case Iface.stats iface do
+      {:error, {:notfound, {:iface, ^iface}}} ->
         :notfound
 
-      {_, opts} ->
-        addrmap = pick_inet_items  opts
-
+      %Iface{addrs: addrmap, flags: flags} ->
         matched? = Enum.all? slices, fn({addr, mask}) ->
-          Map.has_key?(addrmap, addr) and addrmap[addr] === mask
+          addr = InetAddress.to_string addr
+          Map.has_key?(addrmap, addr) and addrmap[addr][:netmask] === mask
         end
 
-        if matched? and Enum.member?(opts[:flags], :up) do
+        if matched? and Enum.member?(flags, :up) do
           :ok
         else
           :invalidcfg
@@ -192,10 +187,9 @@ defmodule Spew.Network do
     end
   end
 
-  defp pick_inet_items(opts), do: pick_inet_items(opts, %{})
-  defp pick_inet_items([], acc), do: acc
-  defp pick_inet_items([{:addr, addr}, {:netmask, mask} | rest], acc) do
-      pick_inet_items rest, Map.put(acc, addr, InetAddress.netmask_to_cidr(mask))
+  defp syscmd([cmd | args] = call) do
+    Logger.debug "syscmd: #{Enum.join(call, " ")}"
+    System.cmd System.find_executable(cmd), args, [stderr_to_stdout: true]
   end
-  defp pick_inet_items([_ | rest], acc), do: pick_inet_items(rest, acc)
+
 end
