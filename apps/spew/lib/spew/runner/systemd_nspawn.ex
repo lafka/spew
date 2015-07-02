@@ -28,21 +28,58 @@ defmodule Spew.Runner.SystemdNspawn do
   end
 
   def run(%Item{ref: ref} = instance, opts) do
-    cmd = []
-      |> cmd(:command, instance)
-      |> cmd(:runtime, instance)
-      |> cmd(:network, instance)
-      |> cmd(:env, instance)
-      |> cmd(:mounts, instance)
-      |> List.flatten
+    {cmd, setup, cleanup} = {[], [], []}
+      |> cmd(:command, instance, opts)
+      |> cmd(:runtime, instance, opts)
+      |> cmd(:network, instance, opts)
+      |> cmd(:env, instance, opts)
+      |> cmd(:mounts, instance, opts)
+
+    cmd = List.flatten cmd
 
     defaultopts = ["--kill-signal", "SIGTERM"]
-    cmd = maybe_sudo ++ ["systemd-nspawn" | [defaultopts | cmd]]
+    cmd = maybe_sudo ++ ["systemd-nspawn" | cmd]
 
-    PortRunner.run %{instance | network: nil,
-                                env: nil,
-                                mounts: nil,
-                                command: cmd}, opts
+    case callbacks [instance], setup do
+      :ok ->
+        hooks = cleanup ++ instance.hooks[:stop]
+        case PortRunner.run %{instance | command: cmd, hooks: hooks}, opts do
+          {:ok, _} = res ->
+            res
+
+          res ->
+            callbacks [instance, res], cleanup, false
+            res
+        end
+
+      res ->
+        callbacks [instance, res], cleanup, false
+        res
+    end
+  rescue e in Exception ->
+    {:error, e.message}
+  end
+
+  defp callbacks(args, funs), do: callbacks(args, funs, true)
+  defp callbacks(_args, [], _strict?), do: :ok
+  defp callbacks(args, [fun | rest], strict?) do
+    case apply fun, args do
+      :ok ->
+        callbacks args, rest, strict?
+
+      {:ok, _} ->
+        callbacks args, rest, strict?
+
+      res ->
+        res
+    end
+  rescue e in BadArityError ->
+    if true === strict? do
+      {:error, {:callback, {:badarit, fun}}}
+    else
+      Logger.error "instance/callbacks: bad arity in #{inspect fun}"
+      callbacks args, rest, strict?
+    end
   end
 
   defp maybe_sudo do
@@ -52,18 +89,25 @@ defmodule Spew.Runner.SystemdNspawn do
     end
   end
 
-  defp cmd(acc, :runtime, %Item{runtime: {:chroot, rootfs}} = instance) do
-    ["-D", rootfs | acc]
+  defp cmd({acc, s, c}, :runtime, %Item{runtime: {:chroot, rootfs}} = instance, _opts) do
+    {["-D", rootfs | acc], s, c}
   end
   defp cmd(acc, :network, instance) do
     acc
   end
-  defp cmd(acc, :env, instance) do
+  defp cmd({acc, s, c}, :env, instance, _opts) do
     env = Enum.map instance.env, fn({k, v}) -> "--setenv=#{k}=#{v}" end
     env ++ acc
+    {acc, s, c}
   end
-  defp cmd(acc, :mounts, instance) do
-    acc
+  defp cmd({acc, s, c}, :mounts, instance, _opts) do
+    {acc, s, c}
+  end
+  defp cmd(tmp, :command, %Item{command: "" <> cmd} = instance, opts) do
+    cmd tmp, :command, %{instance | command: Spew.Utils.String.tokenize(cmd)}, opts
+  end
+  defp cmd({acc, s, c}, :command, %Item{command: cmd} = instance, _opts) do
+    {["--", cmd | acc], s, c}
   end
   defp cmd(acc, :command, %Item{command: "" <> cmd} = instance) do
     cmd acc, :command, %{instance | command: Spew.Utils.String.tokenize(cmd)}
