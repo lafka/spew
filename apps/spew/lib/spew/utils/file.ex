@@ -17,5 +17,34 @@ defmodule Spew.Utils.File do
       |> Base.encode16
       |> String.downcase
   end
+
+  @doc """
+  Check the GPG signature of a file
+
+  ## Note
+
+  There is no, or very little, support for GPG directly in Erlang.
+  An external shell is therefore executed to verify the signature.
+  This means that the trustdb of the running user is the one being
+  checked against. All key management is therefore out of `spew`s
+  scope. This will most likely change in future versions
+  """
+  def trusted?(file, signature) do
+    gpg = System.find_executable("gpg")
+    case System.cmd gpg, (case file do
+                           nil -> ["--verify", signature]
+                           file -> ["--verify",  signature, file]
+                         end), [stderr_to_stdout: true] do
+
+      {_, 0} ->
+        :ok
+
+      {_, 2} ->
+        {:error, :unsigned}
+
+      {_, 256} ->
+        {:error, :signature}
+    end
+  end
 end
 

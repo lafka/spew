@@ -20,5 +20,6 @@ config :spew, :provision, [
         "fc00:3000:3::0/64#100"
       ]
     }
-  }
+  },
+  hosts: "/tmp/spew/allocations.ex"
 ]

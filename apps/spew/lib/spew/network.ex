@@ -48,11 +48,23 @@ defmodule Spew.Network do
   end
 
   @doc """
+  Return list of available networks
+  """
+  def networks do
+    networks = Application.get_env(:spew, :provision)[:networks]
+    Enum.map networks, fn({net, opts}) ->
+      {net, opts[:iface]}
+    end
+  end
+
+  @doc """
   Find the preferred network slice
 
   Generate the preferred network ranges based on available networks
   in config. This DOES NOT guarantee that the network slice is
   not already in use by any other hosts.
+
+  @todo 2015-07-01 lafka; check the local hosts file for previous info
   """
   def range(network, host \\ node) do
     case Application.get_env(:spew, :provision)[:networks][network] do

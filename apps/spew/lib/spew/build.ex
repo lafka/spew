@@ -6,7 +6,13 @@ defmodule Spew.Build do
   defmodule Item do
     @moduledoc """
     The concrete build item
+
+    The build API is vague and supports only spewbuilds currently,
+    all functions in this module reflects that.
     """
+
+    require Logger
+
     defstruct ref: nil,
               type: __MODULE__,
               target: "void/void",
@@ -47,6 +53,55 @@ defmodule Spew.Build do
         Map.put acc, name, targetval
       end
     end
+
+    @doc """
+    Unpack a build
+
+    1) Validates checksums, if any
+    2) Validates GPG signature
+    3) Decompresses the file
+
+    ## Build trust
+
+    A small amount of trust can be given to the build by seeing that
+    the build archive haven't changed since it was added and that the
+    signaure is still trusted.
+
+    However there is no checks done to see if any files where added
+    or changed during the lifecycle of the extracted directory.
+    Ideally no such changes should happend, and IF they do the new
+    untar operation should overwrite those changes, unless off course
+    new files where added.
+    """
+    def unpack(%Item{} = build) do
+      target = Path.join [Application.get_env(:spew, :spewroot), "build", build.ref]
+      unpack build, target
+    end
+    def unpack(%Item{spec: %{"ARCHIVE" => archive,
+                             "CHECKSUM" => checksum,
+                             "SIGNATURE" => signature}} = build, target) do
+
+      case Spew.Utils.File.hash(:sha256, archive) do
+        ^checksum ->
+          case Spew.Utils.File.trusted? archive, signature do
+            :ok ->
+              Logger.debug "build[#{build.ref}]: extracting to #{target}"
+              File.mkdir_p! target
+              :ok = :erl_tar.extract archive, [:compressed, {:cwd, target}]
+              {:ok, target}
+
+            {:error, reason} ->
+              {:error, {{:untrusted, reason}, {:build, build.ref}}}
+          end
+
+        _newchecksum -> 
+          Logger.warn "build[#{build.ref}]: checksum mismatch #{archive}"
+          {:error, {:checksum, {:build, build.ref}}}
+      end
+    end
+    def unpack(%Item{} = build, _target) do
+      {:error, {:invalidarchive, {:build, build.ref}}}
+    end
   end
 
 
@@ -54,6 +109,8 @@ defmodule Spew.Build do
   alias __MODULE__.Item
 
   @name __MODULE__.Server
+
+  def server, do: @name
 
   @doc """
   Query builds

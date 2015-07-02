@@ -7,6 +7,7 @@ defmodule Spew.Network.InetAllocator do
   """
 
   @name __MODULE__.Server
+  def server, do: @name
 
   @doc """
   Allocates a ip address
@@ -32,7 +33,8 @@ defmodule Spew.Network.InetAllocator do
   @def """
   Find a allocated ip by some query
 
-  The query is a tuple like `{:host, node()}`, or `{:owner, owner()}`
+  The query is a tuple like `{:host, node()}`, or `{:owner,
+  owner()}` or nil to list all
   """
   def query(query, server \\ @name) do
     GenServer.call server, {:query, query}
@@ -42,6 +44,7 @@ defmodule Spew.Network.InetAllocator do
     defstruct ref: nil,
               owner: {:instance, nil},
               host: nil, # the host that owns the allocation
+              network: nil,
               addrs: []
   end
 
@@ -90,7 +93,8 @@ defmodule Spew.Network.InetAllocator do
           ref: ref,
           host: node,
           owner: :spew,
-          addrs: Enum.map(addrs, fn({k, v}) -> v[:addr] end)
+          network: net,
+          addrs: Enum.map(addrs, fn({k, v}) -> {v[:addr], v[:netmask]} end)
         }}
       end
 
@@ -129,7 +133,7 @@ defmodule Spew.Network.InetAllocator do
             addr = InetAddress.increment range, where
             case Enum.filter state.allocations,
                              fn({ref, %Allocation{addrs: addrs}}) ->
-                               Enum.member? addrs, addr
+                               Enum.member? addrs, {addr, mask}
                              end do
 
               [{ref, %{owner: owner}}] when owner !== who ->
@@ -140,7 +144,7 @@ defmodule Spew.Network.InetAllocator do
               # if the address is already allocated by same owner
               # the ref generated SHOULD be the same, no need to error
               _ ->
-                addr
+                {addr, mask}
             end
           end
 
@@ -148,7 +152,13 @@ defmodule Spew.Network.InetAllocator do
           allocation = %Allocation{ref: ref,
                                    addrs:  addrs,
                                    owner: who,
+                                   network: network,
                                    host: node}
+
+          straddrs = Enum.map(addrs, fn({addr, mask}) ->
+            InetAddress.to_string(addr) <> "/#{mask}"
+          end) |> Enum.join(", ")
+          Logger.info "network[#{network}]: allocating #{straddrs} to #{ref}"
 
           {:reply,
             {:ok, allocation},
@@ -169,7 +179,8 @@ defmodule Spew.Network.InetAllocator do
         nil ->
           {:reply, {:error, {:notfound, {:inetallocation, ref}}}, state}
 
-        _ ->
+        allocation ->
+          Logger.debug "network[#{allocation.network}]: deallocating #{allocation.ref}"
           {:reply, :ok, %{state | allocations: Map.delete(state.allocations, ref)}}
       end
     end
@@ -184,6 +195,9 @@ defmodule Spew.Network.InetAllocator do
       end
     end
 
+    def handle_call({:query, nil}, _from, state) do
+      {:reply, {:ok, state.allocations}, state}
+    end
     def handle_call({:query, {k, v}}, _from, state) do
       res = Enum.filter_map state.allocations,
                             fn({ref, %Allocation{} = allocation}) ->
@@ -196,7 +210,5 @@ defmodule Spew.Network.InetAllocator do
 
     defp spacesize({_,_,_,_}), do: 32
     defp spacesize({_,_,_,_,_,_,_,_}), do: 128
-
   end
-
 end

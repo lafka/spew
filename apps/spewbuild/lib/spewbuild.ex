@@ -46,10 +46,11 @@ defmodule Spewbuild do
     metafile = './SPEWMETA'
     {:ok, [{^metafile, buf}]} = :erl_tar.extract archive, [:memory, {:files, [metafile]}]
     meta = parsemeta(buf)
-            |> Dict.put("ARCHIVE", archive)
-            |> Dict.put("CHECKSUM", Path.basename(archive, ".tar.gz"))
-            |> Dict.put("HOST", "#{node}")
-            |> Dict.put("TYPE", "spew-archive-1.0")
+            |> Map.put("ARCHIVE", archive)
+            |> Map.put("CHECKSUM", hash(:sha256, archive))
+            |> Map.put("HOST", "#{node}")
+            |> Map.put("TYPE", "spew-archive-1.0")
+            |> Map.put("SIGNATURE", archive <> ".asc")
 
     hash = Spew.Utils.File.hash archive
 
@@ -63,4 +64,17 @@ defmodule Spewbuild do
   defp pair(pairs), do: pair(pairs, %{})
   defp pair([], acc), do: acc
   defp pair([k, v | rest], acc), do: pair(rest, Dict.put(acc, k, v))
+
+  # From Spew.Utils.File.hash/2
+  defp hash(type \\ :sha, file) do
+    ctx = :crypto.hash_init type
+
+    File.stream!(file, [], 2048)
+      |> Enum.reduce(ctx, fn(buf, acc) ->
+        :crypto.hash_update acc, buf
+      end)
+      |> :crypto.hash_final
+      |> Base.encode16
+      |> String.downcase
+  end
 end

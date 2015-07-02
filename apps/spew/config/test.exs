@@ -1,5 +1,6 @@
 use Mix.Config
 
+config :spew, :spewroot, spewroot = "/tmp/spewtest-root/"
 config :spew, :appliancepaths, ["./test/appliances"]
 config :spew, :provision, [
   domain: "spew.tm",
@@ -11,5 +12,6 @@ config :spew, :provision, [
         "fc00:4000:4::0/64#100"
       ]
     }
-  }
+  },
+  hosts: nil
 ]

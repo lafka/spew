@@ -57,7 +57,6 @@ defmodule Spew.Runner.Port do
         {pid, monref} = spawn_monitor fn ->
           Process.flag :trap_exit, true
 
-          IO.inspect args
           port = Port.open {:spawn_executable, cmd}, [{:args, args},
                                                       :exit_status,
                                                       :use_stdio,

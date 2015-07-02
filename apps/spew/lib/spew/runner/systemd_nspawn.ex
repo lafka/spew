@@ -8,6 +8,8 @@ defmodule Spew.Runner.SystemdNspawn do
 
   alias Spew.Utils.Time
   alias Spew.Instance.Item
+  alias Spew.Network.InetAllocator
+  alias Spew.Network.InetAllocator.Allocation
   alias Spew.Runner.Port, as: PortRunner
 
   def capabilities, do: [
@@ -89,11 +91,52 @@ defmodule Spew.Runner.SystemdNspawn do
     end
   end
 
-  defp cmd({acc, s, c}, :runtime, %Item{runtime: {:chroot, rootfs}} = instance, _opts) do
-    {["-D", rootfs | acc], s, c}
+  defp cmd({acc, s, c}, :runtime, %Item{runtime: nil} = instance, _opts) do
+    raise Exception, message: {:runtime, :missing}
   end
-  defp cmd(acc, :network, instance) do
-    acc
+  defp cmd({acc, s, c}, :runtime, %Item{} = instance, opts) do
+    case opts[:chroot] do
+      nil ->
+        raise Exception, message: {:runtime, :nochroot}
+
+      rootfs ->
+        {["-D", rootfs | acc], s, c}
+    end
+  end
+  defp cmd({acc, s, c}, :network, %Item{network: nil}, _opts), do:
+    {acc, s, c}
+  defp cmd({acc, s, c}, :network, instance, opts) do
+    # allocate a address, define the future iface name,
+    # define setup/cleanup actions to assign the allocation and cleanup
+    # the shitstorm after
+    readyfornetwork? =  List.flatten(acc)
+                          |> Enum.join(" ")
+                          |> String.match?  ~r/netsetup\.sh/
+
+    unless readyfornetwork? do
+      raise Exception, message: :nonetsetup
+    end
+
+    case InetAllocator.allocate instance.network,
+                                {:instance, instance.ref},
+                                opts[InetAllocator.Server] || InetAllocator.server do
+
+      {:ok, %Allocation{} = allocation} ->
+          # network should exists or it will die later on
+          {_, netiface} = List.keyfind Spew.Network.networks, allocation.network, 0
+
+          setup = fn(instance) ->
+            buf = generate_netsetup "host0", allocation.addrs
+            file = Path.join opts[:chroot], "netsetup.sh"
+
+            File.write file, buf
+          end
+
+          {["--network-bridge", netiface | acc], [setup | s], c}
+
+      {:error, {:already_allocated, {:addr, _} = err}} ->
+        raise Exception, message: err
+    end
   end
   defp cmd({acc, s, c}, :env, instance, _opts) do
     env = Enum.map instance.env, fn({k, v}) -> "--setenv=#{k}=#{v}" end
@@ -109,11 +152,19 @@ defmodule Spew.Runner.SystemdNspawn do
   defp cmd({acc, s, c}, :command, %Item{command: cmd} = instance, _opts) do
     {["--", cmd | acc], s, c}
   end
-  defp cmd(acc, :command, %Item{command: "" <> cmd} = instance) do
-    cmd acc, :command, %{instance | command: Spew.Utils.String.tokenize(cmd)}
+
+  defp generate_netsetup(iface, addrs), do:
+    generate_netsetup(iface, addrs, "ip link set up dev #{iface}\n")
+  defp generate_netsetup(_iface, [], buf), do: buf
+  defp generate_netsetup(iface, [{addr, mask} | rest], buf) do
+    addr = Spew.Utils.Net.InetAddress.to_string addr
+    generate_netsetup iface, rest, buf <> "ip addr add local #{addr}/#{mask} dev #{iface}\n"
   end
-  defp cmd(acc, :command, %Item{command: cmd} = instance) do
-    ["--", cmd | acc]
+
+  defp sterilize(name) do
+    name |> String.downcase
+      |> String.replace(~r/[^a-z0-9_ -]/, "")
+      |> String.replace(" ", "_")
   end
 
   def subscribe(instance, who), do: PortRunner.subscribe(instance, who)
@@ -133,4 +184,9 @@ defmodule Spew.Runner.SystemdNspawn do
   Handle events from InstancePlugin
   """
   def event(_instance, state, _ev), do: state
+
+  defp syscmd([cmd | args] = call) do
+    Logger.debug "syscmd: #{Enum.join(call, " ")}"
+    System.cmd System.find_executable(cmd), args, [stderr_to_stdout: true]
+  end
 end

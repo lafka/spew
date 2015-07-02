@@ -94,4 +94,50 @@ defmodule BuildTest do
                     "test" => [build3.ref],
                     "sibling" => [build4.ref]}}} == Build.query "", true, server
   end
+
+  test "unpack build" do
+    {:ok, server} = Server.start_link name: __MODULE__,
+                                      init: [pattern: "*/*",
+                                             searchpath: [testdir],
+                                             notify_reload?: true]
+
+    # find archive-unsigned and archive-gpg-signed,
+    # the first will fail to unpack as it's unsigned
+    {:ok, builds} = Build.list server
+    {_, gpgsignedbuild} = Enum.find builds, fn({_, %{vsn: vsn}}) -> vsn === "archive-gpg-signed" end
+    {_, unsignedbuild} = Enum.find builds, fn({_, %{vsn: vsn}}) -> vsn === "archive-unsigned" end
+
+    target = tmpdir
+
+    on_exit fn ->
+      File.rm_rf! target
+    end
+
+    :ok = Item.unpack gpgsignedbuild, target
+    {:ok, taredfiles} = :erl_tar.table gpgsignedbuild.spec["ARCHIVE"]
+    taredfiles = Enum.map taredfiles, &("#{&1}")
+    files = filetable target
+
+    assert taredfiles == files
+
+    assert {:error, {{:untrusted, :unsigned}, {:build, unsignedbuild.ref}}} == Item.unpack unsignedbuild, target
+  end
+
+  # @todo 2015-07-02 lafka; should be a test to validate checksum mismatch
+  #                         ie. /something/ changed the build after it
+  #                         was added. Also maybe there should be a
+  #                         way to dictate the checksum to match
+  #                         against in some kind of manifest...
+  defp tmpdir do
+    dir = :crypto.hash(:sha, "#{inspect Spew.Utils.Time.monotonic}")
+      |> Base.encode16
+      |> String.downcase
+      |> String.slice 0, 7
+    Path.join [System.tmp_dir, "spewtest", "build", dir]
+  end
+
+  defp filetable(cwd) do
+    [cwd | Path.wildcard Path.join(cwd, "**")]
+      |> Enum.map &(String.replace(&1, ~r/^#{cwd}\/?/, "./"))
+  end
 end

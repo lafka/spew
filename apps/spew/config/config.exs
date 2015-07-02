@@ -13,7 +13,8 @@ config :spew, :provision, [
         "fc00:2000:2::0/64#100"
       ]
     }
-  }
+  },
+  hosts: "/etc/spew/allocations.ex"
 ]
 
 

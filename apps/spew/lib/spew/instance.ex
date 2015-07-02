@@ -19,8 +19,8 @@ defmodule Spew.Instance do
       appliance: nil,                 # the appliance ref
       runner: Spew.Runner.Port,       # module()
       command: nil,                   # iolist()
-      network: [],                    # [{:bridge, :tm} | :veth]
-      runtime: nil,                   # {:build, build} | {:chroot,a dir}
+      network: nil,                   # network() | nil
+      runtime: nil,                   # {:build, build, target} | {:chroot,a dir}
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
       state: {:starting, 0},          # {state(), now()}
@@ -99,7 +99,7 @@ defmodule Spew.Instance do
     defp supports?(:plugin_opts, _opts, _cap?), do: true
     defp supports?(:hooks, _opts, _cap?), do: true
 
-    defp supports?(:network, [], _cap?), do: true
+    defp supports?(:network, nil, _cap?), do: true
     defp supports?(:runtime, nil, _cap?), do: true
     defp supports?(:mounts, [], _cap?), do: true
     defp supports?(:env, [], _cap?), do: true
@@ -123,9 +123,68 @@ defmodule Spew.Instance do
 
     @doc """
     Runs the instance
+
+    Does the following:
+      1) Setup the overlayfs system to use for chroot (if runtime specified)
+      2) Setup cleanup hooks to unmount he overlayfs
     """
-    def run(spec, opts \\ []) do
+    def run(spec), do: run(spec, [])
+    def run(%{runtime: nil} = spec, opts) do
       spec.runner.run spec, opts
+    end
+    def run(%{runtime: {:build, buildref}} = spec, opts) do
+      case Spew.Build.get buildref, opts[Spew.Build.Server] || Spew.Build.server do
+        {:ok, build} ->
+          case Spew.Build.unpack build do
+            {:ok, chroot} ->
+              case mount_overlay spec, chroot do
+                {:ok, spec, newchroot} ->
+                  spec.runner.run spec, [{:chroot, newchroot} | opts]
+
+                {:error, _} = err ->
+                  err
+              end
+
+            {:error, _} = err ->
+              err
+          end
+
+        {:error, _} = err ->
+          err
+      end
+    end
+    def run(%{runtime: {:chroot, chroot}} = spec, opts) do
+      case mount_overlay spec, chroot do
+        {:ok, spec, newchroot} ->
+          spec.runner.run spec, [{:chroot, newchroot} | opts]
+
+        {:error, _} = err ->
+          err
+      end
+    end
+
+    defp mount_overlay(instance, chroot) do
+      basedir = Path.join [Application.get_env(:spew, :spewroot), "instance", instance.ref]
+      mountpoint = Path.join basedir, "rootfs"
+      overlaydir = Path.join basedir, "overlay"
+      workdir = Path.join basedir, "work"
+
+      Enum.each [mountpoint, overlaydir, workdir], fn(dir) ->
+        File.mkdir_p! dir
+      end
+
+      case Spew.Utils.OverlayFS.mount mountpoint, [overlaydir, chroot], workdir do
+        :ok ->
+          hooks = Dict.put instance.hooks, :stop, [
+            fn(_instance, _reason) ->
+              Spew.Utils.OverlayFS.umount mountpoint
+            end
+            | instance.hooks[:stop] || []]
+          {:ok, %{instance | hooks: hooks}, mountpoint}
+
+        {:error, _err} = res ->
+          res
+      end
     end
 
     @doc """
@@ -468,8 +527,16 @@ defmodule Spew.Instance do
       end
 
       # Don't break on bad hooks
-      res = try do callbacks [spec], spec.hooks[:start]
+      res = try do callbacks [spec], spec.hooks[:start] || []
             catch e -> {:error, e} end
+
+      cleanup = fn(reason) ->
+        try do
+          callbacks [spec, reason], spec.hooks[:stop] || [], false
+        catch
+          e -> {:error, e}
+        end
+      end
 
       case res do
         :ok ->
@@ -492,14 +559,17 @@ defmodule Spew.Instance do
                                                       instances: instances}}
 
                 err ->
+                  cleanup.(err)
                   {:reply, err, state}
               end
 
             {:error, _} = res ->
-               {:reply, res, state}
+              cleanup.(res)
+              {:reply, res, state}
           end
 
         res ->
+          cleanup.(res)
           {:reply, res, state}
       end
     end
@@ -574,7 +644,7 @@ defmodule Spew.Instance do
 
           # we don't care about the result of the hooks, just don't crash
           try do
-            callbacks [spec, reason], spec.hooks[:stop], false
+            callbacks [spec, reason], spec.hooks[:stop] || [], false
           catch
             e -> {:error, e}
           end
