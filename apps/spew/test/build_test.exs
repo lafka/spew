@@ -113,7 +113,7 @@ defmodule BuildTest do
       File.rm_rf! target
     end
 
-    :ok = Item.unpack gpgsignedbuild, target
+    {:ok, _newroot} = Item.unpack gpgsignedbuild, target
     {:ok, taredfiles} = :erl_tar.table gpgsignedbuild.spec["ARCHIVE"]
     taredfiles = Enum.map taredfiles, &("#{&1}")
     files = filetable target
