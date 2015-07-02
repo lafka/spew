@@ -123,7 +123,7 @@ defmodule Spew.Runner.SystemdNspawn do
 
       {:ok, %Allocation{} = allocation} ->
           # network should exists or it will die later on
-          {_, netiface} = List.keyfind Spew.Network.networks, allocation.network, 0
+          {_, netiface} = List.keyfind Spew.Network.list, allocation.network, 0
 
           setup = fn(instance) ->
             buf = generate_netsetup "host0", allocation.addrs

@@ -84,7 +84,7 @@ defmodule Spew.Network.InetAllocator do
 
     def init(opts) do
       # pre allocate the spew host
-      allocations = Enum.into Network.networks, %{}, fn({net, iface}) ->
+      allocations = Enum.into Network.list, %{}, fn({net, iface}) ->
         ref = Spew.Utils.hash({:network, net})
 
         %Iface{addrs: addrs} = Iface.stats iface

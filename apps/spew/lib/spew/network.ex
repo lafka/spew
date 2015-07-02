@@ -50,7 +50,7 @@ defmodule Spew.Network do
   @doc """
   Return list of available networks
   """
-  def networks do
+  def list do
     networks = Application.get_env(:spew, :provision)[:networks]
     Enum.map networks, fn({net, opts}) ->
       {net, opts[:iface]}
