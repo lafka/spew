@@ -1,100 +1,165 @@
-defmodule Spew.Instance.TestPlugin do
-  alias Spew.Instance.Item
-
-  def setup(_instance, _) do
-    %{pid: spawn(&loop/0), started: false}
-  end
-
-  def start(%Item{plugin: %{__MODULE__ => state}}, _) do
-    %{state | started: true}
-  end
-
-  defp loop, do: loop([])
-  defp loop(evs) do
-    receive do
-      {who, ref, :get} when is_pid(who) and is_reference(ref) ->
-        send who, {ref, evs}
-        loop evs
-
-      {who, ref, :clear} when is_pid(who) and is_reference(ref) ->
-        send who, {ref, []}
-        loop []
-
-      ev ->
-        loop [ev | evs]
-    end
-  end
-
-  def event(%Item{plugin: %{ __MODULE__ => %{pid: pid}}}, state, ev) do
-    send pid, ev
-    state
-  end
-
-  def setup?(%Item{plugin: %{ __MODULE__ => %{pid: pid}}}), do: true
-  def setup?(%Item{}), do: false
-
-  def started?(%Item{plugin: %{ __MODULE__ => %{started: val}}}), do: val
-  def started?(%Item{}), do: false
-
-  def clearevs(%Item{plugin: %{ __MODULE__ => %{pid: pid}}}) do
-    ref = make_ref
-    send pid, {self, ref, :clear}
-    monref = Process.monitor pid
-
-    receive do
-      {^ref, events} ->
-        events
-
-      {:DOWN, ^monref, :process, ^pid, _} ->
-        raise Exception, "noproc: #{inspect pid}"
-    end
-  end
-
-  def getevs(%Item{plugin: %{ __MODULE__ => %{pid: pid}}}) do
-    ref = make_ref
-    send pid, {self, ref, :get}
-    monref = Process.monitor pid
-
-    receive do
-      {^ref, events} ->
-        events
-
-      {:DOWN, ^monref, :process, ^pid, _} ->
-        raise Exception, "noproc: #{inspect pid}"
-    end
-  end
-end
-
-defmodule SpewInstancePluginTest do
+defmodule SpewPluginTest do
   use ExUnit.Case
 
-  alias Spew.Instance
-  alias Spew.Runner.Void
-  alias Spew.Instance.Server
-  alias Spew.Instance.Item
-  alias Spew.Instance.TestPlugin
+  alias Spew.Plugin
 
-  test "consume events: :add, :start, :stopping, {:stop, _}, :delete" do
-    {:ok, server} = Server.start_link name: __MODULE__
-    {:ok, instance} = Instance.add "plugin-test",
-                                   %Item{runner: Void,
-                                         plugin_opts: %{ TestPlugin => true}},
-                                   server
-    ref = instance.ref
+  test "plugins" do
+    defmodule BasicPlugin do
+      use Spew.Plugin
 
-    assert TestPlugin.setup? instance
+      def spec(SpewPluginTest), do: []
 
-    {:ok, instance} = Instance.start instance.ref, [], server
+      def init(SpewPluginTest, nil) do
+        {:ok, spawn fn -> loop end}
+      end
 
-    assert TestPlugin.started? instance
+      def loop, do: loop([])
+      def loop(events) do
+        receive do
+          {:ev, ev} ->
+            loop [ev | events]
 
-    assert [] = TestPlugin.getevs instance
+          {:get, {from, ref}} ->
+            send from, {ref, Enum.reverse(events)}
+            loop []
 
-    {:ok, instance} = Instance.stop instance.ref, [], server
-    assert [{:stop, :normal}, {:stopping, nil}] = TestPlugin.getevs instance
-    assert [] = TestPlugin.clearevs instance
+          {:stop, {from, ref}} ->
+            send from, {ref, :stop}
+            :ok
+        end
+      end
 
-    :ok = Instance.delete instance.ref, [], server
-    assert [:delete] = TestPlugin.getevs instance
+      def notify(SpewPluginTest, pid, ev) do
+        send pid, {:ev, ev}
+        :ok
+      end
+
+      def cleanup(SpewPluginTest, pid) do
+        ref = make_ref
+        send pid, {:stop, {self, ref}}
+        receive do
+          {^ref, :stop} ->
+            :ok
+        after 1000 ->
+          exit(:timeout)
+        end
+      end
+    end
+
+    {:ok, plugins} = Plugin.init __MODULE__, [BasicPlugin]
+    {:ok, plugins} = Plugin.notify __MODULE__, plugins, :hello
+    {:ok, plugins} = Plugin.notify __MODULE__, plugins, :you
+
+    ref = make_ref
+    send plugins[BasicPlugin], {:get, {self, ref}}
+    assert_receive {^ref, [:hello, :you]}
+
+    monref = Process.monitor plugins[BasicPlugin]
+    :ok = Plugin.cleanup __MODULE__, plugins
+
+    assert_receive {:DOWN, ^monref, :process, _pid, :normal}
+  end
+
+  test "plugin order" do
+    # Can run anywhere
+    defmodule PluginA do
+      use Spew.Plugin
+
+      def spec(_), do: [ ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    # This will run B unless A is enabled, then A will run first
+    defmodule PluginB do
+      use Spew.Plugin
+
+      def spec(_), do: [ after: [PluginA] ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    # This will run C, A, B
+    defmodule PluginC do
+      use Spew.Plugin
+
+      def spec(_), do: [ require: [PluginB],
+                         before: [PluginA] ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    # this should run A, then B, and afterwards C, D in any order
+    defmodule PluginD do
+      use Spew.Plugin
+
+      def spec(_), do: [ require: [PluginA, PluginC,],
+                         after: [PluginB] ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    {:ok, plugins} = Plugin.init __MODULE__, [PluginD]
+
+    assert [PluginC, PluginA, PluginB, PluginD] == Enum.sort(plugins, fn({_, a}, {_, b}) -> a < b end) |> Dict.keys
+
+    # Cleanup should be called in reverse order
+    :ok = Plugin.cleanup __MODULE__, plugins
+    assert [PluginD, PluginB, PluginA, PluginC] == Enum.map(
+        plugins,
+        fn({plugin, _}) -> {plugin,Process.get({plugin, :cleanup})}
+      end)
+      |> Enum.sort(fn({_, a}, {_, b}) -> a < b end)
+      |> Dict.keys
+
+    {:ok, plugins} = Plugin.init __MODULE__, [PluginA, PluginB]
+    assert [PluginA, PluginB] == Enum.sort(plugins, fn({_, a}, {_, b}) -> a < b end) |> Dict.keys
+  end
+
+  test "plugin order - circular" do
+    # Both want the requirement to run before, we should die
+    defmodule CircularPlugin1 do
+      use Spew.Plugin
+
+      def spec(_), do: [ after: [SpewPluginTest.CircularPlugin2],
+                         require: [SpewPluginTest.CircularPlugin2] ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    defmodule CircularPlugin2 do
+      use Spew.Plugin
+
+      def spec(_), do: [ after: [CircularPlugin1],
+                         require: [CircularPlugin1] ]
+      def init(_caller, _opts) do
+        Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
+        {:ok, t}
+      end
+      def notify(_caller, _state, _ev), do: :ok
+      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+    end
+
+    assert {:error, {:plugindeps, _}} = Plugin.init __MODULE__, [CircularPlugin1, CircularPlugin2]
   end
 end

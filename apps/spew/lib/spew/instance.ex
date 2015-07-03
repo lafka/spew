@@ -5,10 +5,6 @@ defmodule Spew.Instance do
   """
 
   defmodule Item do
-    alias Spew.InstancePlugin
-    alias Spew.InstancePlugin.Discovery
-    alias Spew.InstancePlugin.Console
-
     alias __MODULE__, as: Item
 
     # state() :: :stopped | :stopping | :killed | :killing | :starting |
@@ -24,12 +20,6 @@ defmodule Spew.Instance do
       mounts: [],                     # ["bind(-ro)?/[hostdir/]<rundir>" | "tmpfs/<rundir>"]
       env: [],                        # environment to set on startup
       state: {:starting, 0},          # {state(), now()}
-      plugin_opts: %{ # stores the initial plugin options the instance is called with
-                # this is converted to a map where the options will be
-                # stored in __init__
-          Discovery => [],              # Argument options to discovery
-          Console => []                 # Enable console by default
-      },
       plugin: %{},
       tags: [],                      # [tag, ..]
       hooks: %{
@@ -46,10 +36,10 @@ defmodule Spew.Instance do
 
       unsupported = Enum.filter_map Map.to_list(spec),
         fn({k, v}) ->
-          true !== supports? k, v, Enum.member?(caps, k)
+          true !== supports? k, v, Enum.member?(caps, k), caps
         end,
         fn({k, v}) ->
-          support = supports? k, v, Enum.member?(caps, k)
+          support = supports? k, v, Enum.member?(caps, k), caps
           if false === support do
             {k, v}
           else
@@ -96,7 +86,6 @@ defmodule Spew.Instance do
     defp supports?(:appliance, _, _cap?), do: true
     defp supports?(:runner, _, _cap?), do: true
     defp supports?(:command, nil, _cap?), do: true
-    defp supports?(:plugin_opts, _opts, _cap?), do: true
     defp supports?(:hooks, _opts, _cap?), do: true
 
     defp supports?(:network, nil, _cap?), do: true
@@ -108,17 +97,17 @@ defmodule Spew.Instance do
     defp supports?(:plugin, plugins, _cap?) do
       unsupported = Enum.filter Dict.keys(plugins), fn
         (plugin) ->
-          ! match? {:module, _}, Code.ensure_loaded :"Elixir.Spew.Instance.#{plugin}"
+          ! match? {:module, _}, Code.ensure_loaded plugin
         end
 
       case unsupported do
         [] ->
           true
         plugins ->
-          {:error, {:invalid_plugins, Enum.map(plugins, &(:"Elixir.Spew.Instance.#{&1}"))}}
+          {:error, {:invalid_plugins, plugins}}
       end
     end
-    defp supports?(opt, _plugins, true), do: true
+    defp supports?(_opt, _plugins, true), do: true
     defp supports?(opt, _plugins, _cap?), do: {:error, {:invalid_option, opt}}
 
     @doc """
@@ -128,63 +117,9 @@ defmodule Spew.Instance do
       1) Setup the overlayfs system to use for chroot (if runtime specified)
       2) Setup cleanup hooks to unmount he overlayfs
     """
-    def run(spec), do: run(spec, [])
-    def run(%{runtime: nil} = spec, opts) do
+    def run(%Item{} = spec), do: run(spec, [])
+    def run(%Item{} = spec, opts) do
       spec.runner.run spec, opts
-    end
-    def run(%{runtime: {:build, buildref}} = spec, opts) do
-      case Spew.Build.get buildref, opts[Spew.Build.Server] || Spew.Build.server do
-        {:ok, build} ->
-          case Spew.Build.unpack build do
-            {:ok, chroot} ->
-              case mount_overlay spec, chroot do
-                {:ok, spec, newchroot} ->
-                  spec.runner.run spec, [{:chroot, newchroot} | opts]
-
-                {:error, _} = err ->
-                  err
-              end
-
-            {:error, _} = err ->
-              err
-          end
-
-        {:error, _} = err ->
-          err
-      end
-    end
-    def run(%{runtime: {:chroot, chroot}} = spec, opts) do
-      case mount_overlay spec, chroot do
-        {:ok, spec, newchroot} ->
-          spec.runner.run spec, [{:chroot, newchroot} | opts]
-
-        {:error, _} = err ->
-          err
-      end
-    end
-
-    defp mount_overlay(instance, chroot) do
-      basedir = Path.join [Application.get_env(:spew, :spewroot), "instance", instance.ref]
-      mountpoint = Path.join basedir, "rootfs"
-      overlaydir = Path.join basedir, "overlay"
-      workdir = Path.join basedir, "work"
-
-      Enum.each [mountpoint, overlaydir, workdir], fn(dir) ->
-        File.mkdir_p! dir
-      end
-
-      case Spew.Utils.OverlayFS.mount mountpoint, [overlaydir, chroot], workdir do
-        :ok ->
-          hooks = Dict.put instance.hooks, :stop, [
-            fn(_instance, _reason) ->
-              Spew.Utils.OverlayFS.umount mountpoint
-            end
-            | instance.hooks[:stop] || []]
-          {:ok, %{instance | hooks: hooks}, mountpoint}
-
-        {:error, _err} = res ->
-          res
-      end
     end
 
     @doc """
@@ -318,7 +253,7 @@ defmodule Spew.Instance do
           exit_timeout -> {:error, {:timeout, {:instance, {:stop, ref}}}}
         end
 
-      {:ok, _spec} = res ->
+      {:ok, _spec} ->
         get ref, server
 
       {:error, _} = res ->
@@ -342,7 +277,7 @@ defmodule Spew.Instance do
     end
 
     case GenServer.call(server, {:kill, ref}) do
-      {:ok, _spec} = res when waitforexit? ->
+      {:ok, _spec} when waitforexit? ->
         receive do
           {:ev, ^ref, {:stop, _}} -> get ref, server
         after
@@ -355,6 +290,13 @@ defmodule Spew.Instance do
       {:error, _} = res ->
         res
     end
+  end
+
+  @doc """
+  Notify a instance of an event
+  """
+  def notify(ref, ev, server \\ @name) do
+    GenServer.call server, {:notify, ref, ev}
   end
 
   @doc """
@@ -376,7 +318,7 @@ defmodule Spew.Instance do
     @name __MODULE__
 
     defmodule State do
-      alias Spew.InstancePlugin
+      alias Spew.Plugin
 
       defstruct instances: %{},
                 subscriptions: %{},
@@ -409,23 +351,43 @@ defmodule Spew.Instance do
       @doc """
       Notify some event to subscribers, and update plugins for any
       instances involved.
+
+      Any errors in plugins are ignored unless `strict` is set to true
       """
-      def notify(state, ref, event) do
-        state = case InstancePlugin.event state.instances[ref], event do
-          :ok ->
-            state
+      def notify(state, ref, event, strict \\ false) do
+        instance = state.instances[ref]
 
-          {:update, spec} ->
-            %{state | instances: Map.put(state.instances, ref, spec)}
-        end
-
-        Enum.each state.subscriptions, fn({_ref, {who, match}}) ->
-          if match.({:ev, ref, event}) do
-            send who, {:ev, ref, event}
+        publish = fn(state) ->
+          Enum.each state.subscriptions, fn({_ref, {who, match}}) ->
+            if match.({:ev, ref, event}) do
+              send who, {:ev, ref, event}
+            end
           end
         end
 
-        {:ok, state}
+        state = case Plugin.notify instance, instance.plugin, event do
+          {:ok, plugins} ->
+            instance = %{instance | plugin: plugins}
+            state = %{state | instances: Map.put(state.instances, ref, instance)}
+
+            publish.(state)
+            {:ok, state}
+
+          {:error, {plugin, err}, remaining, instance} when false == strict ->
+            Logger.warn """
+            instance[#{ref}]: plugin error #{plugin}:
+              error: #{inspect err}
+              remaining plugins: #{Enum.join remaining, ", "}"
+            """
+            state = %{state | instances: Map.put(state.instances, ref, instance)}
+
+            publish.(state)
+            {:ok, state}
+
+          {:error, {plugin, err}, remaining, instance} when true == strict ->
+            state = %{state | instances: Map.put(state.instances, ref, instance)}
+            {:error, {err, {:plugin, plugin}}, state}
+        end
       end
     end
 
@@ -443,16 +405,26 @@ defmodule Spew.Instance do
       {:reply, {:error, :ref_not_nil}, state}
     def handle_call({:add, spec}, _from, state) do
       hasinstance? = nil !== state.instances[spec.ref || Spew.Utils.hash(spec)]
+
       case Item.runnable? spec, true do
         true when not hasinstance? ->
-          spec = %{spec | ref: ref = Spew.Utils.hash(spec)}
-          instances = Map.put state.instances, ref, spec
+          instance = %{spec | ref: ref = Spew.Utils.hash(spec)}
 
-          {:ok, state} = State.notify %{state | instances: instances},
-                                      spec.ref,
-                                      :add
+          case Spew.Plugin.init spec, spec.plugin do
+            {:ok, plugins} ->
+              instance = %{instance | plugin: plugins}
+              instances = Map.put state.instances, instance.ref, instance
 
-          {:reply, {:ok, state.instances[ref]}, state}
+              {:ok, state} = State.notify %{state | instances: instances},
+                                          instance.ref,
+                                          :add
+
+              {:reply, {:ok, state.instances[ref]}, state}
+
+            {:error, {:invalid_return, err, {:plugin, p}}} ->
+              Spew.Plugin.cleanup spec, spec.plugin
+              {:error, {err, {:plugin, p}}}
+          end
 
         true when hasinstance? ->
           {:reply, {:error, {:conflict, {:instance, spec.ref}}}, state}
@@ -478,8 +450,18 @@ defmodule Spew.Instance do
           {:reply, {:error, {:notfound, {:instance, ref}}}, state}
 
         _ ->
-          {:ok, state} = State.notify state, ref, :delete
-          {:reply, :ok, %{state | instances: Map.delete(state.instances, ref)}}
+          {:ok, %{instances: instances} = state} = State.notify state, ref, :delete
+
+          # tell plugins to cleanup
+          case Spew.Plugin.cleanup instances[ref], instances[ref].plugin do
+            :ok ->
+              {:reply,
+               {:ok, state.instances[ref]},
+               %{state | instances: Map.delete(state.instances, ref)}}
+
+            {:error, err} ->
+              {:error, {:plugins, err, {:instance, ref}}}
+          end
       end
     end
 
@@ -519,52 +501,82 @@ defmodule Spew.Instance do
       end
     end
 
-    def handle_call({:run, spec, opts}, _from, state) do
-      spec = if ! spec.ref do
-        %{spec | ref: Spew.Utils.hash(spec)}
+    def handle_call({:run, instance, opts}, _from, state) do
+
+      instance = if ! instance.ref do
+        %{instance | ref: Spew.Utils.hash(instance)}
       else
-        spec
+        instance
       end
 
       # Don't break on bad hooks
-      res = try do callbacks [spec], spec.hooks[:start] || []
+      res = try do callbacks [instance], instance.hooks[:start] || []
             catch e -> {:error, e} end
 
-      cleanup = fn(reason) ->
+      cleanup = fn(instance, reason) ->
         try do
-          callbacks [spec, reason], spec.hooks[:stop] || [], false
+          callbacks [instance, reason], instance.hooks[:stop] || [], false
+          Spew.Plugin.cleanup instance, instance.plugin
         catch
           e -> {:error, e}
         end
       end
 
+      # a spec might be given directly, if so plugins are not initialized
+      {res, state, instance} = if :ok === res and ! Map.has_key?(state.instances, instance.ref) do
+        plugins = Map.put instance.plugin, instance.runner, nil
+        Logger.debug "instance[#{instance.ref}]: initializing plugins: #{Enum.join(Map.keys(plugins), ", ")}"
+
+        case Spew.Plugin.init instance, plugins do
+          {:ok, plugins} ->
+            instance = %{instance | plugin: plugins}
+            instances = Map.put state.instances, instance.ref, instance
+
+            {:ok, %{state | instances: instances}, instance}
+
+          {:error, {:invalid_return, err, {:plugin, p}}} ->
+            Spew.Plugin.cleanup instance, instance.plugin
+            {{:error, {err, {:plugin, p}}}, state, instance}
+        end
+      else
+        {res, state, instance}
+      end
+
       case res do
         :ok ->
-          case Item.run(spec, opts) do
-            {:ok, %Item{ref: ref} = newspec} ->
-              case newspec.runner.pid newspec do
+          {err, state} = case State.notify(%{state | instances: instances},
+                                           instance.ref,
+                                           :start,
+                                           true) do
+            {:ok, state} -> {nil, state}
+            {:error, err, state} -> {{:error, err}, state}
+          end
+
+          case err || Item.run(state.instances[instance.ref], opts) do
+            {:ok, %Item{ref: ref} = instance} ->
+              case instance.runner.pid instance do
                 {:ok, pid} ->
-                  instances = Map.put state.instances, newspec.ref, newspec
+                  instances = Map.put state.instances, instance.ref, instance
 
                   {:ok, state} = State.notify %{state | instances: instances},
-                                              spec.ref,
-                                              :start
+                                              instance.ref,
+                                              :started
 
                   instance = state.instances[ref]
 
                   monref = Process.monitor pid
-                  monitors = Map.put state.monitors, {pid, monref}, spec.ref
+                  monitors = Map.put state.monitors, {pid, monref}, instance.ref
 
                   {:reply, {:ok, instance}, %{state | monitors: monitors,
-                                                      instances: instances}}
+                                                      instances: state.instances}}
 
                 err ->
-                  cleanup.(err)
+                  cleanup.(instance, err)
                   {:reply, err, state}
               end
 
             {:error, _} = res ->
-              cleanup.(res)
+              cleanup.(state.instances[instance.ref], res)
               {:reply, res, state}
           end
 
@@ -628,6 +640,19 @@ defmodule Spew.Instance do
       end
     end
 
+    def handle_call({:notify, ref, ev}, _from, state) do
+      case state.instances[ref] do
+        nil ->
+          {:reply, {:error, {:notfound, {:instance, ref}}}, state}
+
+        instance ->
+          {:ok, state} = State.notify state,
+                                      instance.ref,
+                                      {:event, ev}
+        {:reply, {:ok, state.instances[ref]}, state}
+      end
+    end
+
     def handle_info({:DOWN, monref, :process, pid, reason}, state) do
       case state.monitors[{pid, monref}] do
         nil ->
@@ -655,9 +680,7 @@ defmodule Spew.Instance do
 
           monitors = Map.delete state.monitors, {pid, monref}
 
-          {:noreply, %{state |
-                        instances: instances,
-                        monitors: monitors }}
+          {:noreply, %{state | monitors: monitors }}
       end
     end
 
@@ -680,7 +703,7 @@ defmodule Spew.Instance do
         res ->
           res
       end
-    rescue e in BadArityError ->
+    rescue _e in BadArityError ->
       if true === strict? do
         {:error, {:callback, {:badarit, fun}}}
       else

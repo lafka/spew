@@ -1,4 +1,6 @@
 defmodule Spew.Runner.Void do
+  use Spew.Plugin
+
   @moduledoc """
   A void runner that does not actually run anything
   """
@@ -44,7 +46,7 @@ defmodule Spew.Runner.Void do
     send pid, {ref, :stop}
     {:ok, %{spec | state: {:stopping, Time.now(:milli_seconds)}}}
   end
-  def stop(%Item{ref: ref} = spec, _signal) do
+  def stop(%Item{ref: ref}, _signal) do
     {:error, {:no_pid, {:instance, ref}}}
   end
 
@@ -55,8 +57,25 @@ defmodule Spew.Runner.Void do
   def kill(%Item{ref: ref, state: {_, _, _pid}}), do:
     {:error, {:no_pid, {:instance, ref}}}
 
+
+  # Spew.Plugin Callback
   @doc """
-  Handle events from InstancePlugin
+  Plugin spec
   """
-  def event(_instance, state, _ev), do: state
+  def spec(_instance), do: []
+
+  @doc """
+  Plugin init, unused
+  """
+  def init(_instance, _opts), do: {:ok, nil}
+
+  @doc """
+  Handle cleanup of self
+  """
+  def cleanup(_instance, _state), do: :ok
+
+  @doc """
+  Handle plugin events
+  """
+  def notify(_instance, _state, _ev), do: :ok
 end

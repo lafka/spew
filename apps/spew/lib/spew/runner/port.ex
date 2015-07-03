@@ -5,6 +5,8 @@ defmodule Spew.Runner.Port do
   This is non-portable due to the reliance on `kill`
   """
 
+  use Spew.Plugin
+
   require Logger
 
   alias Spew.Utils.Time
@@ -13,8 +15,7 @@ defmodule Spew.Runner.Port do
   def capabilities, do: [
     :plugin,
     :command,
-    :env,
-    :runtime
+    :env
   ]
 
   def supported?, do: true
@@ -43,7 +44,7 @@ defmodule Spew.Runner.Port do
   def pid(%Item{ref: ref}), do:
     {:error, {:no_pid, {:instance, ref}}}
 
-  def run(%Item{ref: ref, command: nil} = spec, _opts), do:
+  def run(%Item{ref: ref, command: nil}, _opts), do:
     {:error, {:empty_command, {:instance, ref}}}
   def run(%Item{ref: ref, command: [cmd | args]} = spec, opts) do
     Logger.debug "runner/port: exec #{cmd} #{List.flatten(args) |> Enum.join(" ")}"
@@ -65,14 +66,27 @@ defmodule Spew.Runner.Port do
 
           receive do
             {^port, {:exit_status, 0}} -> collect_and_exit port, {parent, retref}, :normal
-            {^port, {:exit_status, n}} -> collect_and_exit port, {parent, retref}, {:crashed, 1}
+            {^port, {:exit_status, n}} -> collect_and_exit port, {parent, retref}, {:crashed, n}
             {:EXIT, ^port, :normal}    -> collect_and_exit port, {parent, retref}, :normal
             {:EXIT, ^port, reason}     -> collect_and_exit port, {parent, retref}, reason
           after
             # catch startup errors
             250 ->
               send parent, {retref, :ok, port}
-              portproxy spec.ref, port
+              subscribers = Enum.reduce opts[:subscribe], %{}, fn(t, subscribers) ->
+                {monref, pid} = case t do
+                  {pid, returnref} ->
+                    monref = Process.monitor pid
+                    send pid, {returnref, :subscribed}
+                    {monref, pid}
+
+                  pid ->
+                    {Process.monitor(pid), pid}
+                end
+
+               Map.put(subscribers, monref, pid)
+              end
+              portproxy spec.ref, port, subscribers
           end
         end
 
@@ -103,7 +117,7 @@ defmodule Spew.Runner.Port do
         end
     end
   end
-  def run(%Item{ref: ref} = spec, _opts), do:
+  def run(%Item{ref: ref}, _opts), do:
     {:error, {:invalid_command, {:instance, ref}}}
 
   defp collect_and_exit(port, from, reason), do: collect_and_exit(port, from, reason, [])
@@ -117,7 +131,6 @@ defmodule Spew.Runner.Port do
     end
   end
 
-  defp portproxy(ref, port), do: portproxy(ref, port, %{})
   defp portproxy(ref, port, subscribers) do
     receive do
       {^port, {:data, buf}} ->
@@ -145,17 +158,22 @@ defmodule Spew.Runner.Port do
         portproxy ref, port, subscribers
 
       {:stop, {who, returnref}, signal} ->
-        signal = signal || "TERM"
+        signal = signal || "SIGTERM"
         send who, {returnref, :stopping}
         # Ask nicely for port to quit
         {:os_pid, ospid} = Port.info(port, :os_pid)
-        {"", 0} = System.cmd System.find_executable("kill"), ["-s", signal, "#{ospid}"]
-        Port.close port
+        case System.cmd System.find_executable("sudo"), ["kill", "-s", signal, "#{ospid}"] do
+          {"", 0} ->
+            Port.close port
+
+          {_, _} ->
+            :ok
+        end
 
         # wait for exit
         portproxy ref, port, subscribers
 
-      {:kill, {who, returnref} = from} ->
+      {:kill, {_who, _returnref} = from} ->
         send self, {:stop, from, "KILL"}
         portproxy ref, port, subscribers
 
@@ -176,7 +194,7 @@ defmodule Spew.Runner.Port do
         send pid, {returnref, :subscribed}
         portproxy ref, port, Map.put(subscribers, monref, pid)
 
-      {:DOWN, monref, :process, pid, _reason} ->
+      {:DOWN, monref, :process, _pid, _reason} ->
         portproxy ref, port, Map.delete(subscribers, monref)
 
       msg ->
@@ -193,8 +211,7 @@ defmodule Spew.Runner.Port do
   end
   def stop(%Item{state: {{:crashed, _}, _}} = spec, _signal), do:
     {:ok, spec}
-  def stop(%Item{plugin: %{__MODULE__ => %{pid: pid}},
-                 ref: ref} = spec,
+  def stop(%Item{plugin: %{__MODULE__ => %{pid: pid}}} = spec,
            signal) do
 
     {monref, returnref} = {Process.monitor(pid), make_ref}
@@ -204,25 +221,24 @@ defmodule Spew.Runner.Port do
       {^returnref, :stopping} ->
         {:ok, %{spec | state: {:stopping, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, :normal} ->
+      {:DOWN, ^monref, :process, ^pid, :normal} ->
         {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, :noproc} ->
+      {:DOWN, ^monref, :process, ^pid, :noproc} ->
         {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, reason} ->
+      {:DOWN, ^monref, :process, ^pid, reason} ->
         {:ok, %{spec | state: {{:crashed, reason}, Time.now(:milli_seconds)}}}
     end
   end
-  def stop(%Item{ref: ref} = spec, _signal) do
+  def stop(%Item{ref: ref}, _signal) do
     {:error, {:no_proc, {:instance, ref}}}
   end
 
   # there's no difference in kill vs stop here as they both rely on
   # Port.close/1 in the end. One could call the OS but this should work
   # until proven otherwise
-  def kill(%Item{plugin: %{__MODULE__ => %{pid: pid}},
-                 ref: ref} = spec) do
+  def kill(%Item{plugin: %{__MODULE__ => %{pid: pid}}} = spec) do
     {monref, returnref} = {Process.monitor(pid), make_ref}
     send pid, {:stop, {self, returnref}}
 
@@ -230,21 +246,38 @@ defmodule Spew.Runner.Port do
       {^returnref, :stopping} ->
         {:ok, %{spec | state: {:killing, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, :normal} ->
+      {:DOWN, ^monref, :process, ^pid, :normal} ->
         {:ok, %{spec | state: {:killing, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, :noproc} ->
+      {:DOWN, ^monref, :process, ^pid, :noproc} ->
         {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
-      {:DOWN, monref, :process, ^pid, reason} ->
+      {:DOWN, ^monref, :process, ^pid, reason} ->
         {:ok, %{spec | state: {{:crashed, reason}, Time.now(:milli_seconds)}}}
     end
   end
   def kill(%Item{ref: ref, state: {_, _, _pid}}), do:
     {:error, {:no_proc, {:instance, ref}}}
 
+
+  # Spew.Plugin callbacks
   @doc """
-  Handle events from InstancePlugin
+  Plugin spec
   """
-  def event(_instance, state, _ev), do: state
+  def spec(_instance), do: []
+
+  @doc """
+  Plugin init, unused
+  """
+  def init(_instance, _opts), do: {:ok, nil}
+
+  @doc """
+  Handle cleanup of self
+  """
+  def cleanup(_instance, _state), do: :ok
+
+  @doc """
+  Handle plugin events
+  """
+  def notify(_instance, _state, _ev), do: :ok
 end

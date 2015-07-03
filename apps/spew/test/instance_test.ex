@@ -14,7 +14,7 @@ defmodule SpewInstanceTest do
     {:error, {:conflict, {:instance, _}}} = Instance.add "add-test", %Item{runner: Void}, server
 
     assert {:ok, instance} == Instance.get instance.ref, server
-    assert :ok == Instance.delete instance.ref, [], server
+    assert {:ok, _} = Instance.delete instance.ref, [], server
 
     assert {:error, {:notfound, {:instance, instance.ref}}} == Instance.get instance.ref, server
   end
@@ -29,7 +29,7 @@ defmodule SpewInstanceTest do
     {:ok, list} = Instance.list server
     assert Enum.sort([instance1, instance2]) == Enum.sort(list)
 
-    :ok = Instance.delete instance2.ref, [], server
+    assert {:ok, _} = Instance.delete instance2.ref, [], server
     assert {:ok, [^instance1]} = Instance.list server
   end
 
@@ -73,7 +73,7 @@ defmodule SpewInstanceTest do
     {:ok, pid} = instance.runner.pid instance
     Process.monitor pid
 
-    :ok = Instance.delete instance.ref, [kill?: true], server
+    assert {:ok, _} = Instance.delete instance.ref, [kill?: true], server
     assert_receive {:DOWN, _ref, :process, ^pid, :killed}
 
     assert {:error, {:notfound, {:instance, _ref}}} = Instance.get instance.ref, server
@@ -87,7 +87,7 @@ defmodule SpewInstanceTest do
     {:ok, pid} = instance.runner.pid instance
     monref = Process.monitor pid
 
-    :ok = Instance.delete instance.ref, [stop?: true], server
+    assert {:ok, _} = Instance.delete instance.ref, [stop?: true], server
     assert_received {:DOWN, ^monref, :process, ^pid, :normal}
 
     assert {:error, {:notfound, {:instance, _ref}}} = Instance.get instance.ref, server
@@ -107,8 +107,64 @@ defmodule SpewInstanceTest do
 
     assert :started = Agent.get agent, &(&1)
 
-    {:ok, instance} = Instance.stop instance.ref, [], server
+    {:ok, _instance} = Instance.stop instance.ref, [], server
 
     assert :normal = Agent.get agent, &(&1)
+  end
+
+  test "plugin events", ctx do
+    defmodule ConsumePlugin do
+      use Spew.Plugin
+
+      alias Spew.Instance.Item
+      def spec(%Item{}), do: []
+      def init(%Item{}, {pid, ref}) do
+        {:ok, {{pid, ref}, []}}
+      end
+
+      def notify(%Item{}, {_ret, _events}, {:event, :ignore}), do: :ok
+      def notify(%Item{}, {ret, events}, ev) do
+        {:update, {ret, [ev | events]}}
+      end
+
+      def cleanup(%Item{}, {{ret, ref}, _}) do
+        send ret, {ref, :cleaned}
+        :ok
+      end
+    end
+
+    ref = make_ref
+    spec = %Item{runner: Void,
+                 plugin: %{ConsumePlugin => {self, ref}}}
+
+
+    {:ok, server} = Server.start_link name: ctx[:test]
+
+    {:ok, instance} = Instance.add "plugin-test", spec, server
+    {:ok, instance} = Instance.start instance.ref, [], server
+    {:ok, instance} = Instance.stop instance.ref, [], server
+    {:ok, instance} = Instance.start instance.ref, [], server
+
+    Instance.notify instance.ref, :ignore, server
+    Instance.notify instance.ref, :ev, server
+
+    monref = Process.monitor instance.plugin[Spew.Runner.Void][:pid]
+
+    {:ok, instance} = Instance.kill instance.ref, [], server
+    {:ok, instance} = Instance.delete instance.ref, [], server
+
+
+    assert {_, [:delete,
+                {:stop, :killed},
+                :killing,
+                {:event, :ev},
+                :start,
+                {:stop, :normal},
+                {:stopping, nil = _signal},
+                :start,
+                :add]} = instance.plugin[ConsumePlugin]
+
+    # by now we should have received the clean notification
+    assert_received {^ref, :cleaned}
   end
 end

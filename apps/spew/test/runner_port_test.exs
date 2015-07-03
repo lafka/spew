@@ -33,22 +33,19 @@ defmodule RunnerPortTest do
     assert {:running, _} = instance.state
 
     ref = instance.ref
+
     extpid = receive do
       {:output, ^ref, "pid: " <> extpid} ->
-          extpid
+        extpid
     after 5000 ->
       exit(:no_output)
     end
 
     monref = Process.monitor instance.plugin[Runner][:pid]
-    {:ok, instance} = Instance.stop instance.ref, [], server
+    {:ok, _instance} = Instance.stop instance.ref, [], server
 
-    receive do
-      {:DOWN, ^monref, :process, _pid, reason} ->
-        assert {_, 1} = System.cmd System.find_executable("ps"), ["-p", String.rstrip(extpid)]
-    after 60000 ->
-      raise :timeout
-    end
+    assert_receive {:DOWN, ^monref, :process, _pid, :normal}
+    assert {_, 1} = System.cmd System.find_executable("ps"), ["-p", String.rstrip(extpid)]
   end
 
   test "io loop" do

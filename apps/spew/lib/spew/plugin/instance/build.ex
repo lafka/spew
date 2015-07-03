@@ -1,6 +1,6 @@
-defmodule Spew.Plugin.Instance.Network do
+defmodule Spew.Plugin.Instance.Build do
   @moduledoc """
-  Plugin to automatically allocate a network address
+  Plugin to automatically verify, unpack builds and cleanup builds
   """
 
   use Spew.Plugin
@@ -12,12 +12,19 @@ defmodule Spew.Plugin.Instance.Network do
   @doc """
   Spec for Build plugin
   """
-  def spec(%Item{}), do:
-    [ ]
+  def spec(%Item{}) do
+    alias Spew.Plugin.Instance.OverlayMount
+
+    [
+      require: [OverlayMount], # If we have a build we have a overlay
+      before:  [OverlayMount] # run before on load, and after on cleanup
+    ]
+  end
 
   @doc """
   Plugin init:
-    - Ensure the network and the slice is setup
+    - verify build
+    - async unpack
   """
   def init(_instance, _opts) do
     Logger.debug "instance[#{_instance.ref}]: init plugin #{__MODULE__}"
@@ -26,18 +33,15 @@ defmodule Spew.Plugin.Instance.Network do
 
   @doc """
   Cleanup build:
-    - Ensure the allocation is removed from the network slice
+    - remove the actual build
   """
   def cleanup(_instance, _state) do
     Logger.debug "instance[#{_instance.ref}]: cleanup after plugin #{__MODULE__}"
+    :ok
   end
 
   @doc """
   Handle plugin events
-    - on :start allocate the address
-    - on {:stop, :normal} deallocate the address
-    - on {:stop, {:crash, _}} keep the allocation so we respawn at same address
   """
   def notify(_instance, _state, _ev), do: :ok
 end
-
