@@ -69,6 +69,8 @@ defmodule Spew.Utils.Net do
     Helper functions for ip addresses
     """
 
+    use Bitwise
+
     import Kernel, except: [to_string: 1]
 
     @doc """
@@ -104,7 +106,7 @@ defmodule Spew.Utils.Net do
     Convert a string to erlang style ip addresses, ignoring CIDR
     notation if any
     """
-    def parse(ip), do: :inet_parse.address hd(String.split("#{ip}", "/"))
+    def parse(ip), do: :inet_parse.address '#{hd(String.split("#{ip}", "/"))}'
 
     @doc """
     See `parse/1`
@@ -151,5 +153,32 @@ defmodule Spew.Utils.Net do
 
       {a, b, c, d, e, f, g, h}
     end
+
+    @doc """
+    Find a subnet of size `claim` in the `ip`/`mask` network
+    If claim is not given use the max size for the address family
+    """
+    def subnet({ip, mask} = net, forwho), do: subnet({ip, mask}, forwho, maxrange(ip))
+    def subnet({_ip, mask}, forwho, claim) when mask > claim do
+      raise SubnetRangeException, message: "network claim to bug",
+                                  range: mask,
+                                  claim: claim
+    end
+    def subnet({ip, mask}, forwho, claim) do
+      size = claim - mask
+
+      hash = :crypto.hash(:sha, :erlang.term_to_binary(forwho))
+              |> :binary.decode_unsigned
+
+      where = hash &&& (trunc(:math.pow(2, size)) - 1)
+
+      {increment(ip, where <<< (maxrange(ip) - claim)), claim}
+    end
+
+    @doc """
+    Return the netsize for a address family
+    """
+    def maxrange({_,_,_,_}), do: 32
+    def maxrange({_,_,_,_,_,_,_,_}), do: 128
   end
 end

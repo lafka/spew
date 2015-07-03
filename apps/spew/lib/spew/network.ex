@@ -1,199 +1,940 @@
 defmodule Spew.Network do
   @moduledoc """
-  Support for automating some network work
+  Support for automating network setup
 
-  The module is responsible for automatically assigning subnets to a
-  host when it starts up AND to make sure there are not to many
-  conflicts.
+  A network consists of:
+    * `Network Space` :: Network - the ip range(s) available to a network
+    * `Subnet Delegation` :: Slice - The subnet(s) of the Network Space delegated to a slice
+    * `Subnet Claim` :: Slice - The size to claim for a Subnet Delegation
+    * `IP Allocation` :: Allocation - A allocated ip within a Subnet Delegation
 
-  In essence spew will define a set of networks, the networks have
-  one or more address spaces it can use (ip6 and ip4).
-  The node name will use the hash of the hostname then use the `claim`
-  parameter from the network to see how big slice of the network it
-  should claim.  Most cases this will work fine since there will be
-  a large network (/16, /12, or /8) to take items from.
+  Each Slice has a one-to-one mapping with a Spew host. The Subnet
+  Delegation for that slice is given by mapping the `node` hash to
+  the available addresses (subtracting the Subnet Claim from the
+  available Network Space).
 
-  To make sure there are no collisions spew will check if it's in
-  cluster mode, and if so it will wait to spawn instances until it
-  has been able to sync the network table with atleast one other node
+  Each Spew host runs a network server, this network server is
+  responsible for setting up the bridge for that Slice. Routing
+  between those is out of scope of this document, but it's assumed
+  that all the bridges will enslave a device that connects them all.
 
-  ## Initial Network setup
+  ## IP Allocation
 
-  For convenience, and until the API is less vague, this module also
-  has some helper functions to setup the initial bridge, it does not
-  make any assumptions on how addresses are delegated within that
-  space but they can easily be passed on to a running instance
-
-  ## IP allocation & DNS
-
-  When a instance is created a IP address will be allocated either by
-  finding it in the `spewhosts` file or by randomly selecting a unused
-  address from the host network slice.
-
-  The spewhosts file can be bind mounted by a runner to provide unicast
-  lookup for hosts.
+  Once all the Spew hosts agree on a network topology, the Network
+  server responsible for a Slice can allocate addresses. This is done
+  in the manner as with Subnet Delegation where the hash of the
+  claiming entity (ie. a instance) will be mapped to the available
+  address space of that Slice. Again collisions are probable.
   """
 
-  require Logger
+  alias Spew.Utils
+  alias __MODULE__
 
-  use Bitwise
+  @name __MODULE__.Server
 
-  alias Spew.Utils.Net.Iface
-  alias Spew.Utils.Net.InetAddress
+  @doc """
+  The network structure
 
-  defmodule NetRangeException do
-    defexception message: nil,
-                 range: nil,
-                 claim: nil
+  ## Fields
+
+    * `:ref` - a unique string used to identify the network
+    * `:name` - name the name of the network
+    * `:iface` - the name of the iface to create
+    * `:ranges` - the name of the iface
+    * `:hosts` - list of nodes in the network
+    * `:slices` - All the slices in this network
+  """
+  defstruct ref: nil,
+            name: nil,
+            iface: nil,
+            ranges: [],
+            hosts: %{},
+            slices: %{}
+
+  @type t :: %__MODULE__{
+      ref: network,
+      name: String.t,
+      iface: String.t | nil,
+      ranges: [Spew.Network.Slice.subnet],
+      hosts: %{},
+      slices: %{}
+  }
+
+
+  @typedoc """
+  The unique reference to a network
+  """
+  @type network :: String.t
+
+
+  def genref(term, true = _external?) do
+    "net-" <> genref(term, false)
+  end
+
+  def genref(term, _full?) do
+    Utils.hash(term) |> String.slice(0, 8)
+  end
+
+
+  @doc """
+  Create a new network
+  """
+  @spec create(%Network{}, GenServer.server) :: {:ok, %Network{}} | {:error, term}
+  def create(%Network{} = network, server \\ @name) do
+    GenServer.call server, {:create, network}
+  end
+
+
+  @doc """
+  Get a network definition
+  """
+  @spec get(network, GenServer.server) :: {:ok, t} | {:error, term}
+  def get("net-" <> network, server \\ @name) do
+    GenServer.call server, {:get, network}
+  end
+
+
+  @doc """
+  Delete a network
+
+  If the network have any slices this function will fail
+  """
+  @spec delete(network, GenServer.server) :: :ok | {:error, term}
+  def delete("net-" <> network, server \\ @name) do
+    GenServer.call server, {:delete, network}
+  end
+
+
+  @doc """
+  List networks
+  """
+  @spec networks(GenServer.server) :: {:ok, [t]} | {:error, term}
+  def networks(server \\ @name) do
+    GenServer.call server, :list
+  end
+
+
+  @doc """
+  Join GenServer identified by `serverref` to `network`, if such network exists
+  """
+  @spec join(GenServer.server, network, GenServer.server) :: :ok | {:error, term}
+  def join(remoteserver, "net-" <> network, server  \\ @name) do
+    GenServer.call server, {:join, remoteserver, network}
+  end
+
+
+  @doc """
+  Remove `serverref_or_pid` from `network`, if such network exists
+  """
+  @spec leave(String.t | GenServer.server, network, GenServer.server) :: :ok | {:error, term}
+  def leave(serverref_or_pid, "net-" <> network, server  \\ @name) do
+    GenServer.call server, {:leave, serverref_or_pid, network}
   end
 
   @doc """
-  Return list of available networks
+  Show status of siblings server for `network`
+
+  The returned map will show %{ serverref => :ok | :down } where :ok
+  means no down message have been received yet.
   """
-  def list do
-    networks = Application.get_env(:spew, :provision)[:networks]
-    Enum.map networks, fn({net, opts}) ->
-      {net, opts[:iface]}
-    end
+  @spec cluster(network,  GenServer.server) :: {:ok, %{}} | {:error, term}
+  def cluster("net-" <> network, server \\ @name) do
+    GenServer.call server, {:cluster, network}
+  end
+
+
+
+
+  @doc """
+  Delegate a subnet in `network` to `host`
+  """
+  @spec delegate(network, term, GenServer.server) :: {:ok, Spew.Network.Slice.t} | {:error, term}
+  def delegate("net-" <> network, forwho, server \\ @name) do
+    GenServer.call server, {:delegate, network, forwho}
+  end
+
+
+  @doc """
+  Remove the delegated `slice` from `network`
+
+  This is a async operation where the slice will be marked as inactive
+  and no new ip allocations can be done. It's up to the caller to
+  make all the allocations are disabled.
+
+  Once all allocations are removed the slice will be deleted
+  """
+  @spec undelegate(Spew.Network.Slice.slice, GenServer.server) :: :ok | {:error, term}
+  def undelegate("slice-" <> slice, server \\ @name) do
+    GenServer.call server, {:undelegate, slice}
   end
 
   @doc """
-  Find the preferred network slice
-
-  Generate the preferred network ranges based on available networks
-  in config. This DOES NOT guarantee that the network slice is
-  not already in use by any other hosts.
-
-  @todo 2015-07-01 lafka; check the local hosts file for previous info
+  Get a network slice
   """
-  def range(network, host \\ node) do
-    case Application.get_env(:spew, :provision)[:networks][network] do
-      nil ->
-        {:error, {:notfound, {:network, network}}}
+  @spec slice(Spew.Network.Slice.slice, GenServer.server) :: {:ok, [t]} | {:error, term}
+  def slice("slice-" <> slice, server \\ @name) do
+    GenServer.call server, {:getslice, slice}
+  end
 
-      %{range: range} = network ->
-        slices = Enum.map range, fn
-          (line) ->
-            {ip, mask, claim} = parserange line
-            if mask > claim do
-              raise NetRangeException, message: "network claim to big",
-                                       range: mask,
-                                       claim: claim
+  @doc """
+  List Network Slices
+  """
+  @spec slices(network, GenServer.server) :: {:ok, [t]} | {:error, term}
+  def slices("net-" <> network, server \\ @name) do
+    GenServer.call server, {:slices, network}
+  end
+
+
+
+
+
+  @doc """
+  Allocate a IP for `owner` in `slice`
+
+  If the allocation already exists AND it's state is inactive it will
+  be reactivated
+  """
+  @spec allocate(Spew.Network.Slice.slice, Spew.Network.Allocation.owner, GenServer.server) :: {:ok, Spew.Network.Allocation.t} | {:error, term}
+  def allocate("slice-" <> slice, owner, server \\ @name) do
+    GenServer.call server, {:allocate, slice, owner}
+  end
+
+
+  @doc """
+  Deallocate `ref`
+
+  This is a async operation, the allocation is marked as inactive and
+  should not be referenced by any services. Once the owner is dead
+  it can safely be removed
+  """
+  @spec deallocate(Spew.Network.Allocation.allocation, GenServer.server) :: :ok | {:error, term}
+  def deallocate("allocation-" <> allocation, server \\ @name) do
+    GenServer.call server, {:deallocate, allocation}
+  end
+
+  @doc """
+  Get a allocation
+  """
+  @spec allocation(Spew.Network.Allocation.allocation, GenServer.server) :: {:ok, Spew.Network.Allocation.t} | {:error, term}
+  def allocation("allocation-" <> allocref, server \\ @name) do
+    GenServer.call server, {:get_allocation, allocref}
+  end
+
+  @doc """
+  List all allocations for either a
+  """
+  @spec allocations(Spew.Network.network | Spew.Network.Slice.slice, GenServer.server) :: {:ok, [Spew.Network.Allocation.t]} | {:error, term}
+  def allocations(ref), do: allocations(ref, @name)
+  def allocations("slice-" <> sliceref, server) do
+    GenServer.call server, {:allocations, :slice, sliceref}
+  end
+  def allocations("net-" <> netref, server) do
+    GenServer.call server, {:allocations, :network, netref }
+  end
+
+
+
+
+  defmodule Server do
+    defmodule State do
+
+      @doc """
+      The Network server state
+
+      ## Fields
+
+        * `:networks :: %{ Spew.Network.network => Spew.Network.t}` - The network definitions
+      """
+      defstruct name: nil,
+                networks: %{}
+
+      @type t :: %__MODULE__{}
+
+      @typep ref :: Network.network | Slice.slice | Allocation.allocation
+      @typep types :: Network.t | Slice.t | Allocation.t
+
+      alias __MODULE__
+      alias Spew.Network
+      alias Spew.Network.Slice
+      alias Spew.Network.Allocation
+
+      # All items are stored with two types of ref:
+      # - external ref (ie slice-135ab5/fa93eb) stored in the object
+      # - the partial ref (ie. fa93eb) used for lookup
+      @doc """
+      Lookup a item in the state by its external reference
+      """
+      @spec getbyref(ref, t) :: {:ok, types} | {:error, term}
+      def getbyref("slice-" <> ref,
+                   %State{} = state) do
+
+        [net, slice] = String.split ref, "/"
+        dobyref ref, [{:network, net}, {:slice, slice}], state
+      end
+
+
+      def getbyref("net-" <> ref,
+                   %State{} = state) do
+
+        dobyref ref, [{:network, ref}], state
+      end
+
+
+      def getbyref("allocation-" <> ref,
+                   %State{} = state) do
+
+        [net, slice, allocation] = String.split ref, "/"
+        dobyref ref, [{:network, net}, {:slice, slice}, {:allocation, allocation}], state
+      end
+
+
+      def getbyref(ref, _state) do
+        {:error, {:invalid_ref, ref}}
+      end
+
+
+
+      @doc """
+      Update a item in the state by its external reference
+      If the item does not previously exist it will be inserted anyway
+      """
+      @spec putbyref(ref, types, t) :: {:ok, t} | {:error, term}
+      def putbyref("net-" <> ref,
+                   newnet,
+                   %State{} = state) do
+
+        dobyref ref, [{:network, ref, newnet}], state, true
+      end
+
+
+      def putbyref("slice-" <> ref,
+                   newslice,
+                   %State{} = state) do
+        [net, slice] = String.split ref, "/"
+        dobyref ref,
+                [{:network, net}, {:slice, slice, newslice}],
+                state,
+                true
+      end
+
+
+      def putbyref("allocation-" <> ref,
+                   alloc,
+                   %State{} = state) do
+
+        [net, slice, allocation] = String.split ref, "/"
+        dobyref ref,
+                [{:network, net}, {:slice, slice}, {:allocation, allocation, alloc}],
+                state,
+                true
+      end
+
+
+      def putbyref(ref, _item, _state) do
+        {:error, {:invalid_ref, ref}}
+      end
+
+
+
+      defp put_or_delete(items, ref, nil), do: Map.delete(items, ref)
+      defp put_or_delete(items, ref, val), do: Map.put(items, ref, val)
+
+      defp dobyref(ref, op, state), do:
+        dobyref(ref, op, state, false)
+
+      defp dobyref(_extref,
+                   [{:network, netref, val}],
+                   %State{networks: networks} = state,
+                   true), do:
+
+        {:ok, %{state | networks: put_or_delete(networks, netref, val)}}
+
+      defp dobyref(_extref,
+                   [{:slice, sliceref, val}],
+                   %Network{slices: slices} = network,
+                   true), do:
+
+        {:ok, %{network | slices: put_or_delete(slices, sliceref, val)}}
+
+      defp dobyref(_extref,
+                   [{:allocation, ref, val}],
+                   %Slice{allocations: allocs} = slice,
+                   true), do:
+
+        {:ok, %{slice | allocations: put_or_delete(allocs, ref, val)}}
+
+
+      defp dobyref(extref,
+                   [{:network, netref} | rest],
+                   %State{networks: networks} = state,
+                   keep?) do
+
+        case networks[netref] do
+          nil ->
+            {:error, {:notfound, "net-" <> extref}}
+
+          %Network{} = network when keep? ->
+            maybe dobyref(extref, rest, network, keep?), fn(network) ->
+              {:ok, %{state | networks: Map.put(networks, netref, network)}}
             end
 
-            size = claim - mask
-            hash = :crypto.hash(:sha, :erlang.term_to_binary(host))
-              |> :binary.decode_unsigned
+          %Network{} = network ->
+            dobyref extref, rest, network, keep?
+        end
+      end
 
-            where = hash &&& (:erlang.trunc(:math.pow(2, size)) - 1)
 
-            {InetAddress.increment(ip, where <<< (spacesize(ip) - claim)), claim}
+      defp dobyref(extref,
+                   [{:slice, sliceref} | rest],
+                   %Network{slices: slices} = network,
+                   keep?) do
+
+        case slices[sliceref] do
+          nil ->
+            {:error, {:notfound, "slice-" <> extref}}
+
+          %Slice{} = slice when keep? ->
+            maybe dobyref(extref, rest, slice, keep?), fn(slice) ->
+              {:ok, %{network | slices: Map.put(slices, sliceref, slice)}}
+            end
+
+          %Slice{} = slice ->
+            dobyref extref, rest, slice, keep?
+        end
+      end
+
+
+      defp dobyref(extref,
+        [{:allocation, allocref} | rest],
+        %Slice{allocations: allocations} = slice,
+        keep?) do
+
+        case allocations[allocref] do
+          nil ->
+            {:error, {:notfound, "allocation-" <> extref}}
+
+          # this is the last level, no need to keep? anythign
+          %Allocation{} = allocation when keep? ->
+            maybe dobyref(extref, rest, allocation, keep?), fn(allocation) ->
+              {:ok, %{slice | allocations: Map.put(slice, allocref, allocation)}}
+            end
+
+          %Allocation{} = allocation ->
+            dobyref extref, rest, allocation, keep?
+        end
+      end
+
+      defp dobyref(_extref, [], term, _keep?), do: {:ok, term}
+
+      defp maybe({:ok, res}, fun), do: fun.(res)
+      defp maybe({:error, _} = res, _fun), do: res
+    end
+
+    use GenServer
+
+    alias Spew.Network
+    alias Spew.Network.Slice
+    alias Spew.Network.Allocation
+
+    require Logger
+
+    @name __MODULE__
+
+    def start(opts \\ []) do
+      name = opts[:name] || @name
+      initopts = opts[:init] || []
+
+      GenServer.start __MODULE__,  initopts, [name: name]
+    end
+
+    def start_link(opts \\ []) do
+      name = opts[:name] || @name
+      initopts = opts[:init] || []
+
+      GenServer.start_link __MODULE__,  initopts, [name: name]
+    end
+
+    def init(opts) do
+      networks = Enum.reduce opts[:networks] || [],
+                             %State{}.networks, fn
+                              (%Network{} = network, acc) ->
+                                ref = Network.genref network.name, false
+                                extref = Network.genref network.name, true
+
+                                ranges = Enum.map network.ranges, &Slice.parserange/1
+
+                                Map.put acc, ref, %{network | ref: extref, ranges: ranges}
+
+                              (term, acc) ->
+                                Logger.warn "network[]: invalid network spec: #{inspect term}"
+                                acc
+                              end
+
+      {:ok, %State{name: opts[:name] || node,
+                   networks: networks}}
+    end
+
+
+    def handle_call({:create, %Network{ref: ref} = network},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      # ref may not be set, or might have an external ref set
+      matchref = Network.genref network.name, false
+      ref = String.replace ref || matchref, ~r/^net-/, ""
+      refmatches? = ref == matchref
+
+      case networks[ref] do
+        _ when not refmatches? ->
+          {:reply,
+           {:error, {:invalid_ref, "net-" <> ref}},
+           state}
+
+        nil ->
+          ranges = Enum.map network.ranges, &Slice.parserange/1
+          network = %{network | ref: Network.genref(network.name, true), ranges: ranges}
+
+          syncnet state.name, network
+
+          {:reply,
+           {:ok, network},
+           %{state | networks: Map.put(networks, ref, network)}}
+
+        _network ->
+          {:reply,
+           {:error, {:conflict, "net-" <> ref}},
+           state}
+      end
+    end
+
+
+    def handle_call({:get,  ref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[ref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> ref}},
+           state}
+
+        network ->
+          {:reply,
+           {:ok, network},
+           state}
+      end
+    end
+
+    def handle_call({:delete,  ref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[ref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> ref}},
+           state}
+
+        %Network{slices: slices} when slices == %{} ->
+          {:reply,
+           :ok,
+           %{state | networks: Map.delete(networks, ref)}}
+
+        %Network{slices: _slices} ->
+          {:reply,
+           {:error, {:not_empty, "net-" <> ref}},
+           state}
+      end
+    end
+
+
+    def handle_call(:list,
+                    _from,
+                    %State{networks: networks} = state) do
+
+      {:reply,
+       {:ok, Map.values(networks)},
+       state}
+    end
+
+
+    def handle_call({:join, remote, ref},
+                    _from,
+                    %State{networks: networks} = state) when remote === self do
+
+      # we are joining ourselves, append and update the remote notes
+      case networks[ref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> ref}},
+           state}
+
+        %Network{hosts: hosts} = network ->
+          network = %{network | hosts: Map.put(hosts, state.name, {self, :ok})}
+          syncnet state.name, network
+
+          {:reply,
+           :ok,
+           %{state | networks: Map.put(networks, ref, network)}}
+      end
+    end
+
+    def handle_call({:join, remote, netref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      netcopy = networks[netref]
+
+      case Network.get "net-" <> netref, remote do
+        {:error, {:notfound, "net-" <> ^netref}} when nil === netcopy ->
+          {:reply,
+           {:error, {:notfound, "net-" <> netref}},
+           state}
+
+        {:error, {:notfound, "net-" <> ^netref}} ->
+          Logger.debug "network[#{netcopy.ref}]: pushing to remote #{inspect remote}"
+          {:error, {:notfound, name, _}} = Network.cluster "net-" <> netref, remote
+          network = %{netcopy | hosts: Map.put(netcopy.hosts, name, {remote, :ok})}
+          Process.monitor remote
+
+          syncnet state.name, network
+
+          {:reply,
+           :ok,
+           %{state | networks: Map.put(networks, netref, network)}}
+
+        {:ok, %Network{} = network} when netcopy ->
+          Logger.debug "network[#{network.ref}]: merging #{inspect self} with #{inspect remote}"
+          {:ok, newnet} = mergenet network, netcopy
+
+          Enum.each newnet.hosts, fn({name, {remote, remstate}}) ->
+            :ok === remstate && nil === netcopy.networks[name] && Process.monitor remote
+          end
+
+          syncnet state.name, network
+
+          {:reply,
+           :ok,
+           %{state | networks: Map.put(networks, netref, newnet)}}
+
+        {:ok, %Network{hosts: hosts} = network} ->
+          Logger.debug "network[#{network.ref}]: synced from remote #{inspect remote}"
+          Enum.each hosts, fn({name, {remote, remstate}}) ->
+            Logger.debug "network[#{network.ref}]: #{state.name} monitoring #{name}"
+            :ok === remstate && Process.monitor remote
+          end
+
+          network = %{network | hosts: Map.put(hosts, state.name, {self, :ok})}
+
+          syncnet state.name, network
+
+          {:reply,
+           :ok,
+           %{state | networks: Map.put(networks, netref, network)}}
+      end
+    end
+
+
+    def handle_call({:cluster, ref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[ref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, state.name, "net-" <> ref}},
+           state}
+
+        %Network{hosts: hosts} ->
+          {:reply,
+           {:ok, state.name, hosts},
+           state}
+      end
+    end
+
+
+    # @todo 2015-07-30 lafka; more options should be passed when
+    # delegating subnet. for instance claim size - which will
+    # significantly increase management work
+    def handle_call({:delegate, netref, forwho},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[netref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> netref}},
+           state}
+
+        %Network{} = network ->
+          case Slice.delegate network, forwho do
+            {:ok, {sliceref, slice}} ->
+              # Check for collision
+              collisions = Enum.filter_map network.slices, fn({_sliceref, refslice}) ->
+                  Enum.any? refslice.ranges, &Enum.member?(slice.ranges, &1)
+                end,
+                fn({_sliceeref, refslice}) ->
+                  refslice.ref
+                end
+
+              case collisions do
+                [] ->
+                  network = %{network | slices: Map.put(network.slices, sliceref, slice)}
+                  syncnet state.name, network
+                  {:reply,
+                    {:ok, slice},
+                    %{state | networks: Map.put(networks, netref, network)}}
+
+                collisions ->
+                  {:reply,
+                   {:error, {:conflict, {:slices, collisions}, "net-" <> netref}},
+                   state}
+              end
+
+
+            {:error, _} = err ->
+              {:reply,
+               err,
+               state}
+          end
+      end
+    end
+
+
+    def handle_call({:undelegate, sliceref},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "slice-" <> sliceref, state do
+        {:ok, %Slice{allocations: allocs} = slice} when 0 == map_size(allocs) ->
+          {:ok, %State{} = newstate} = State.putbyref slice.ref, nil, state
+          {:reply,
+           {:ok, %{slice | active: false}},
+           newstate}
+
+        {:ok, %Slice{} = slice} ->
+          {:ok, %State{} = newstate} = State.putbyref slice.ref, %{slice | active: false}, state
+          {:reply,
+           {:ok, %{slice | active: false}},
+           newstate}
+      end
+    end
+
+
+    def handle_call({:getslice, sliceref},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "slice-" <> sliceref, state do
+        {:ok, %Slice{} = slice} ->
+          {:reply,
+           {:ok, slice},
+           state}
+
+        {:error, _} = err ->
+          {:reply,
+           err,
+           state}
+      end
+    end
+
+
+    def handle_call({:slices, netref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[netref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> netref}},
+           state}
+
+        %Network{slices: slices} ->
+          {:reply,
+           {:ok, Map.values(slices)},
+           state}
+      end
+    end
+
+
+    def handle_call({:allocate, sliceref, owner},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "slice-" <> sliceref, state do
+        {:ok, %Slice{allocations: allocs} = slice} ->
+          case Allocation.allocate slice, owner do
+            {:ok, allocation} ->
+              {:ok, newstate} = State.putbyref allocation.ref, allocation, state
+              {:reply,
+               {:ok, allocation},
+               newstate}
+
+            {:error, _} = err ->
+              {:reply,
+               err,
+               state}
+          end
+
+        {:error, _} = err ->
+          {:reply,
+           err,
+           state}
+      end
+    end
+
+
+    def handle_call({:deallocate, allocref},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "allocation-" <> allocref, state do
+        {:ok, %Allocation{} = alloc} ->
+          {:ok, newstate} = State.putbyref "allocation-" <> allocref, nil, state
+          {:reply,
+           {:ok, Allocation.disable(alloc)},
+           newstate}
+
+        {:error, _} = err ->
+          {:reply,
+           err,
+           state}
+      end
+    end
+
+    def handle_call({:get_allocation, allocation},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "allocation-" <> allocation, state do
+        {:ok, %Allocation{} = alloc} ->
+          {:reply,
+           {:ok, alloc},
+           state}
+
+        {:error, _} = err ->
+          {:reply,
+           err,
+           state}
+      end
+    end
+
+    def handle_call({:allocations, :network, netref},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case networks[netref] do
+        nil ->
+          {:reply,
+           {:error, {:notfound, "net-" <> netref}},
+           state}
+
+        %Network{slices: slices} ->
+          allocations = Enum.flat_map slices, fn({_sref, %Slice{} = slice}) ->
+                          Map.values slice.allocations
+                        end
+          {:reply,
+           {:ok, Enum.sort(allocations)},
+           state}
+      end
+    end
+
+    def handle_call({:allocations, :slice, sliceref},
+                    _from,
+                    %State{} = state) do
+
+      case State.getbyref "slice-" <> sliceref, state do
+        {:ok, %Slice{} = slice} ->
+          {:reply,
+           {:ok, Enum.sort(Map.values(slice.allocations))},
+           state}
+
+        {:error, _} = err ->
+          {:reply,
+           err,
+           state}
+      end
+    end
+
+
+    def handle_cast({:update, :networks, ref, network},
+                    %State{networks: networks} = state) do
+
+      Logger.debug "network[#{network.ref}]: #{state.name} received sync request"
+
+      hosts = networks[ref] && networks[ref].hosts || %{}
+      Enum.each network.hosts, fn({name, {remote, remstate}}) ->
+        if ! hosts[name] and name !== state.name do
+          Logger.debug "network[#{network.ref}]: #{state.name} joined #{name} (state: #{remstate})"
+          :ok === remstate && Process.monitor remote
+        end
+      end
+
+      {:noreply, %{state | networks: Map.put(networks, ref, network)}}
+    end
+
+
+    def handle_info({:DOWN, _monref, :process, pid, _},
+                    %State{networks: networks} = state) do
+
+      networks = Enum.into networks, %{}, fn({ref, network}) ->
+        hosts = Enum.into network.hosts, %{}, fn({name, {rempid, remstate}}) ->
+          Logger.debug "checking if #{inspect pid} == #{inspect rempid}"
+          if pid === rempid do
+            Logger.warn "network[#{ref}]: server #{name} dropped out"
+            {name, {rempid, :down}}
+          else
+            {name, {rempid, remstate}}
+          end
         end
 
-        {:ok, %{ranges: slices, iface: network[:iface] || network}}
+        {ref, %{network | hosts: hosts}}
+      end
 
-      _ ->
-        {:error, {:input, :range_or_claim_missing, {:network, network}}}
+      {:noreply, %{state | networks: networks}}
     end
-  rescue
-    e in NetRangeException ->
-      {:error, {:netrange, e, {:network, network}}}
-  end
 
-  defp parserange({_,_,_} = res), do: res
-  defp parserange("" <> range) do
-    [ip, mask, claim] = String.split range, ["/", "#"]
-    {:ok, ip} = :inet_parse.address '#{ip}'
-    {mask, ""} = Integer.parse mask
-    {claim, ""} = Integer.parse claim
-    {ip, mask, claim}
-  rescue e in MatchError ->
-    raise NetRangeException, message: "invalid range"
-  end
 
-  defp spacesize({_,_,_,_}), do: 32
-  defp spacesize({_,_,_,_,_,_,_,_}), do: 128
-
-  @doc """
-  Calls the correct system commands to setup the initial bridge
-
-  This does offcourse require root access, however if the bridge is
-  already up with the correct configuration there's not need.
-
-  @todo provide utility scripts to configure the bridge to avoid
-  general sudo overuse in spew itself. could even put it in spewtils
-  """
-  def setupbridge(network, host \\ node) do
-    {:ok, net} = range network, host
-    case check_bridge net.iface, net.ranges do
-      :notfound ->
-        case create_bridge net.iface do
-          true ->
-            configure_iface(net.iface, net.ranges)
-
-          {:error, n} ->
-            {:error, {:createbr, {:exit, n}, {:iface, net.iface}}}
-        end
-
-      :invalidcfg ->
-        Logger.warn "iface[#{net.iface}] bridge already exists but with invalid config, maybe its in use?"
-        configure_iface(net.iface, net.ranges)
-
-      :ok ->
-        # Ensure iface is up
-        configure_iface net.iface, []
-    end
-  end
-
-  defp create_bridge(iface) do
-    case syscmd ["sudo", "brctl", "addbr", iface] do
-
-      {_, 0} -> true
-      {_, n} -> {:error, n}
-    end
-  end
-
-  defp configure_iface(iface, []) do
-    case syscmd ["sudo", "ip", "link", "set", "up", "dev", iface] do
-      {_, 0} -> true
-      {_, n} -> {:error, :linkup, {:exit, n}, {:iface, iface}}
-    end
-  end
-  defp configure_iface(iface, [{addr, mask} | slice]) do
-    addr = InetAddress.increment addr, 1
-    addr = :inet_parse.ntoa addr
-
-    case syscmd ["sudo", "ip", "addr", "add", "local", "#{addr}/#{mask}", "dev", iface] do
-      {_, 0} -> configure_iface iface, slice
-      {_, 2} -> configure_iface iface, slice
-      {_, n} -> {:error, :addrset, {:exit, n}, {:iface, iface}}
-    end
-  end
-
-  defp check_bridge(iface, slices) do
-    {:ok, ifaces} = :inet.getifaddrs
-    case Iface.stats iface do
-      {:error, {:notfound, {:iface, ^iface}}} ->
-        :notfound
-
-      %Iface{addrs: addrmap, flags: flags} ->
-        matched? = Enum.all? slices, fn({addr, mask}) ->
-          addr = InetAddress.increment addr, 1
-          addr = InetAddress.to_string addr
-          Map.has_key?(addrmap, addr) and addrmap[addr][:netmask] === mask
-        end
-
-        if matched? and Enum.member?(flags, :up) do
+    defp syncnet(caller, %Network{ref: "net-" <> ref} = network) do
+      Enum.each network.hosts, fn
+        ({_name, {remote, _}}) when remote === self ->
           :ok
-        else
-          :invalidcfg
-        end
+
+        ({name, {remote, :ok}}) ->
+          Logger.debug "network[#{ref}]: #{name} joining #{caller}"
+          GenServer.cast remote, {:update, :networks, ref, network}
+
+        ({name, {_remote, :down}}) ->
+          Logger.debug "network[#{ref}]: not pushing state to dead server #{name}"
+      end
+    end
+
+    # try to do an intelligent merge
+    # the only things we care about is that hosts and slices are updated
+    # and if ranges don't add up we assume that `a` is correct since
+    # it's from the existing network. If any slices fall out of the
+    # potential new range we will ignore them for now.
+    defp mergenet(a, b) do
+      if a.ranges !== b.ranges do
+        Logger.warn """
+        network[#{a.ref}]: trying to merge divergent ranges:
+          a: #{Enum.join(a.ranges, ",")}
+          b: #{Enum.join(b.ranges, ",")}
+        #> Chaos will occur
+        """
+      end
+
+      newhosts = Enum.reduce b.hosts, a.hosts, fn({name, {remote, state}}, hosts) ->
+        Map.put_new hosts, {name, {remote, state}}
+      end
+
+      newslices = Enum.reduce b.slices, a.slices, fn({ref, %Slice{} = slice}, slices) ->
+        Map.put_new slices, ref, slice
+      end
+
+      %{a |
+        hosts: newhosts,
+        slices: newslices}
     end
   end
-
-  defp syscmd([cmd | args] = call) do
-    Logger.debug "syscmd: #{Enum.join(call, " ")}"
-    System.cmd System.find_executable(cmd), args, [stderr_to_stdout: true]
-  end
-
 end
