@@ -18,19 +18,22 @@ defmodule Spew.Network.Slice do
   ## Fields
 
     * `:ref :: slice` - the unique string used to identify the slice
-    * `:owner :: owner` - the owning entity of this network slice
-    * `:ranges :: [subnet]` - List of subnets delegated to this slice
+    * `:iface` - The name of the iface for this slice
+    * `:owner` - the owning entity of this network slice
+    * `:ranges` - List of subnets delegated to this slice
     * `:allocations :: [Spew.Network.Allocation.t]` - Map of ip allocations
     * `:active :: bool` - State of the network slice
   """
   defstruct ref: nil,
             owner: nil,
+            iface: nil,
             ranges: [],
             allocations: %{},
             active: true
 
   @type t :: %__MODULE__{
     ref: slice,
+    iface: String.t | nil,
     owner: owner,
     ranges: %{},
     allocations: %{},
@@ -49,10 +52,10 @@ defmodule Spew.Network.Slice do
     Spew.Utils.hash(term) |> String.slice(0, 8)
   end
 
-  def delegate(%Network{ranges: []} = network, _forwho) do
+  def delegate(%Network{ranges: []} = network, _opts) do
     {:error, {:noranges, {:network, network.ref}}}
   end
-  def delegate(%Network{ranges: ranges} = network, forwho) do
+  def delegate(%Network{ranges: ranges} = network, opts) do
     exhausted = Enum.reduce ranges, [], fn({ip, mask, claim}, acc) ->
       ref = InetAddress.to_string(ip) <> "/#{mask}"
       available = trunc(:math.pow(2, claim - mask)) - map_size(network.slices)
@@ -65,16 +68,18 @@ defmodule Spew.Network.Slice do
 
     case exhausted do
       [] ->
+        owner = opts[:owner] || node
         slice = %Slice{
-          ref: genref(network, forwho, true),
-          owner: forwho,
+          ref: genref(network, owner, true),
+          iface: opts[:iface] || network.iface,
+          owner: owner,
           ranges: Enum.map(ranges, fn({ip, mask, claim}) ->
-                    InetAddress.subnet({ip, mask}, forwho, claim)
+                    InetAddress.subnet({ip, mask}, owner, claim)
                   end),
           allocations: %{}
         }
 
-        {:ok, {genref(network, forwho, false), slice}}
+        {:ok, {genref(network, owner, false), slice}}
 
       exhausted ->
         {:error, {:exhausted, exhausted, network.ref}}
