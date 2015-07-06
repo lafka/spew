@@ -37,7 +37,8 @@ defmodule SpewNetworkTest do
   test "slice delegation (delegate, slices, slice, undelegate)", ctx do
     name = "slice-delegation"
     network = %Network{name: name,
-                       ranges: ["172.16.0.0/12#24"]}
+                       ranges: ["fe00::a:1/112#124"]}
+
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -56,7 +57,7 @@ defmodule SpewNetworkTest do
   test "inet allocatation (allocate, deallocate, allocation, allocations)", ctx do
     name = "ip-allocation"
     network = %Network{name: name,
-                       ranges: ["172.16.0.0/12#24"]}
+                       ranges: ["fe00::b:1/112#124"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -85,9 +86,9 @@ defmodule SpewNetworkTest do
     # We then allocate delegate 172.16.0.2 to one slice and 172.16.0.4
     # to a different one
     name = "network-over-delegation"
-    range = "172.16.0.0/29"
+    range = "fe00::c:1/126"
     network = %Network{name: name,
-                       ranges: ["#{range}#30", "172.16.0.0/24#27"]}
+                       ranges: ["#{range}#127", "fe00::d:1/112#120"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -102,7 +103,7 @@ defmodule SpewNetworkTest do
     # what happens when there are no more space to allocate in a slice
     name = "slice-over-allocation"
     network = %Network{name: name,
-                       ranges: ["172.16.0.0/29#30"]}
+                       ranges: ["fe00::e:1/125#126"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -115,22 +116,65 @@ defmodule SpewNetworkTest do
     assert {:error, {:exhausted, [range], slice.ref}} == Network.allocate slice.ref, "addr-3", server
   end
 
-  test "auto-create bridge", ctx do
-    name = "testautobr"
+  test "ip4 allocation", ctx do
+    # what happens when there are no more slices left in network?
+    # we have the range 172.16.0.2 to .6 (.1 is the bridge, .7 broadcast)
+    # We then allocate delegate 172.16.0.2 to one slice and 172.16.0.4
+    # to a different one
+    name = "ip4 allocation"
+    range = "172.20.0.0/29"
     network = %Network{name: name,
-                       ranges: ["172.16.0.0/29#30"]}
-
-    iface = "spewtestautobr"
+                       ranges: ["#{range}#30", "172.20.1.0/24#27"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
-    {:ok, slice} = Network.delegate network.ref, [owner: "slice", iface: iface], server
+    {:ok, slice} = Network.delegate network.ref, [owner: "slice-1"], server
+    {ip, mask} = hd slice.ranges
+    range = InetAddress.to_string(ip) <> "/#{mask}"
 
-    # When we allocate a address the bridge should be configured
-    assert {:error, {:notfound, {:iface, ^iface}}} = Iface.stats iface
     {:ok, _alloc} = Network.allocate slice.ref, "addr-1", server
-    assert {:ok, %Iface{
-    }} = Iface.stats iface
+    {:ok, _alloc} = Network.allocate slice.ref, "addr-2", server
+    assert {:error, {:exhausted, [range], slice.ref}} == Network.allocate slice.ref, "addr-3", server
+
+  end
+  test "auto-(create,delete) bridge", ctx do
+    name = "testautobr"
+    network = %Network{name: name,
+                       ranges: ["fe00::f:1/112#124"]}
+
+
+    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+
+    {:ok, [%Network{ref: "net-" <> iface} = network]} = Network.networks server
+
+    {:ok, slice} = Network.delegate network.ref, [owner: "slice"], server
+    [{ip, mask}] = slice.ranges
+    sliceiface = %{addr: ip, netmask: mask, type: :inet6}
+
+    # * create a bridge on allocation
+    {:ok, alloc} = Network.allocate slice.ref, "addr-1", server
+    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+
+    # * on removal of all allocation, the address is removed
+    {:ok, _} = Network.deallocate alloc.ref, server
+    {:ok, %Iface{addrs: addrs}} = Iface.stats iface
+    assert %{} == addrs
+
+    # * on slice undelegation with no allocations the bridge is removed
+    {:ok, _} = Network.undelegate slice.ref, server
+    assert {:error, {:notfound, {:iface, ^iface}}} = Iface.stats iface
+
+    # * on slice undelegation with active allocations the bridge is # kept
+    {:ok, slice} = Network.delegate network.ref, [owner: "slice", iface: iface], server
+    {:ok, alloc} = Network.allocate slice.ref, "addr-1", server
+    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+
+    {:ok, _} = Network.undelegate slice.ref, server
+    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+
+    # -> until last allocation is deleted when the bridge is removed
+    {:ok, _} = Network.deallocate alloc.ref, server
+    assert {:error, {:notfound, {:iface, ^iface}}} = Iface.stats iface
   end
 
 end

@@ -9,6 +9,7 @@ defmodule Spew.Utils.Net do
     """
 
     alias Spew.Utils.Net.InetAddress
+    alias __MODULE__
 
     defstruct name: nil,
               flags: [],
@@ -26,9 +27,119 @@ defmodule Spew.Utils.Net do
           {:error, {:notfound, {:iface, iface}}}
 
         {_, opts} ->
-          split_params opts, %__MODULE__{name: iface}
+          {:ok, split_params(opts, %__MODULE__{name: iface})}
       end
     end
+
+    @doc """
+    Remove a subnet `ranges` from `iface`
+    """
+    @spec remove_addrs(String.t, [{:inet.ip_address, 0..128}]) :: :ok | {:error, term}
+    def remove_addrs(iface, ranges) do
+      require Logger
+
+      case stats iface do
+        {:ok, %Iface{addrs: addrs}} ->
+          cmds = Enum.filter_map ranges, fn({ip, mask}) ->
+              ip = InetAddress.to_string ip
+              Map.has_key?(addrs, ip) && addrs[ip][:netmask] === mask
+            end,
+            fn({ip, mask}) ->
+              ip = InetAddress.to_string ip
+              maybe_sudo ++ ["ip", "addr", "del", "local", "#{ip}/#{mask}", "dev", iface]
+            end
+        
+          untilerr cmds, :ok, &syscmd/1
+
+        {:error, _} = res ->
+          res
+      end
+    end
+
+    @doc """
+    Ensure that the bridge `iface` is available with the ip ranges `ranges`
+    """
+    @spec ensure_bridge(String.t, [{:inet.ip_address, 0..128}]) :: :ok | {:error, term}
+    def ensure_bridge(iface, ranges) do
+      require Logger
+
+      case stats iface do
+        {:ok, %Iface{addrs: addrs}} ->
+          # check my ranges
+          errors = Enum.filter ranges, fn({ip, mask}) ->
+            ip = InetAddress.to_string ip
+            ! Map.has_key?(addrs, ip) || addrs[ip][:netmask] !== mask
+          end
+
+          case errors do
+            [] ->
+              cmds = [maybe_sudo ++ ["ip", "link", "set", "up", "dev", iface]]
+              untilerr cmds, :ok, &syscmd/1
+
+            errs ->
+              Logger.error """
+              iface[#{iface}]: configured but lacks setup for:
+                #{Enum.map(ranges, fn({ip,mask}) -> "\t* #{InetAddress.to_string(ip)}/#{mask}\n" end)}
+              current configuration:
+                #{Enum.map(addrs, fn({_,%{addr: ip, netmask: mask}}) -> "\t* #{InetAddress.to_string(ip)}/#{mask}\n" end)}
+              """
+
+              {:error, {{:noaddr, errs}, {:iface, iface}}}
+          end
+
+        {:error, {:notfound, {:iface, _}}} ->
+          addrs = Enum.map ranges, fn({ip, mask}) ->
+            ip = InetAddress.to_string ip
+            maybe_sudo ++ ["ip", "addr", "add", "local", "#{ip}/#{mask}", "dev", iface]
+          end
+
+          cmds = [maybe_sudo ++ ["brctl", "addbr", iface] | addrs]
+
+          untilerr cmds, :ok, &syscmd/1
+      end
+    end
+
+    @doc """
+    Remove a bridge completely
+    """
+    @spec remove_bridge(String.t) :: :ok | {:error, term}
+    def remove_bridge(iface) do
+      cmds = [
+        maybe_sudo ++ ["ip", "link", "set", "down", "dev", iface],
+        maybe_sudo ++ ["brctl", "delbr", iface],
+      ]
+      untilerr cmds, :ok, &syscmd/1
+    end
+
+    defp syscmd([cmd | args]) do
+      require Logger
+      Logger.debug "exec #{Enum.join([cmd | args], " ")}"
+      case System.cmd System.find_executable(cmd),
+                      args,
+                      [stderr_to_stdout: true] do
+
+        {_buf, 0} ->
+          :ok
+
+        {buf, n} -> 
+          {:error, {{:cmdexit, n}, [cmd | args], buf}}
+      end
+    end
+    defp untilerr([], ret, _), do: ret
+    defp untilerr([e | rest], ret, fun) do
+      case fun.(e) do
+        :ok -> untilerr rest, ret, fun
+        res -> res
+      end
+    end
+
+    defp maybe_sudo do
+      case System.get_env("USER") do
+        "root" -> []
+        _ -> ["sudo"]
+      end
+    end
+
 
     defp split_params([], acc), do: acc
     defp split_params([{:addr, addr} = t | opts], acc) do
@@ -158,8 +269,8 @@ defmodule Spew.Utils.Net do
     Find a subnet of size `claim` in the `ip`/`mask` network
     If claim is not given use the max size for the address family
     """
-    def subnet({ip, mask} = net, forwho), do: subnet({ip, mask}, forwho, maxrange(ip))
-    def subnet({_ip, mask}, forwho, claim) when mask > claim do
+    def subnet({ip, _mask} = net, forwho), do: subnet(net, forwho, maxrange(ip))
+    def subnet({_ip, mask}, _forwho, claim) when mask > claim do
       raise SubnetRangeException, message: "network claim to bug",
                                   range: mask,
                                   claim: claim

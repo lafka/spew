@@ -616,8 +616,16 @@ defmodule Spew.Network do
                     _from,
                     %State{} = state) do
 
+      alias Spew.Utils.Net.Iface
+
       case State.getbyref "slice-" <> sliceref, state do
         {:ok, %Slice{allocations: allocs} = slice} when 0 == map_size(allocs) ->
+          {:ok, %Network{ref: "net-" <> netref} = network}
+            = State.getbyref "net-" <> sliceref, state
+          iface = slice.iface || network.iface || netref
+
+          Iface.remove_bridge iface
+
           {:ok, %State{} = newstate} = State.putbyref slice.ref, nil, state
           {:reply,
            {:ok, %{slice | active: false}},
@@ -672,23 +680,41 @@ defmodule Spew.Network do
                     _from,
                     %State{} = state) do
 
+      alias Spew.Utils.Net.Iface
       case State.getbyref "slice-" <> sliceref, state do
-        {:ok, %Slice{allocations: allocs} = slice} ->
-          # Ensure bridge is up and running.
-          # This call might originate anywhere so we need to make
-          # sure that this is only executed on the host that should 
-          #{:ok, network} = State.getbyref "net-" <> sliceref, state
-          #res = case Slice.ensure_bridge network, slice do
-          #  :ok -> nil
-          #  {:error, _} = res -> res
-          #end
-
+        {:ok, %Slice{} = slice} ->
           case Allocation.allocate slice, owner do
             {:ok, allocation} ->
-              {:ok, newstate} = State.putbyref allocation.ref, allocation, state
-              {:reply,
-               {:ok, allocation},
-               newstate}
+              {:ok, %Network{ref: "net-" <> netref} = network}
+                = State.getbyref "net-" <> sliceref, state
+
+              iface = slice.iface || network.iface || netref
+              case Iface.ensure_bridge iface, slice.ranges do
+                :ok ->
+                  {:ok, newstate} = State.putbyref allocation.ref, allocation, state
+                  {:reply,
+                   {:ok, allocation},
+                   newstate}
+
+                {:error, {{:cmdexit, n}, cmd, buf}} ->
+                  Logger.error """
+                  network[#{netref}]: failed to setup bridge
+                    iface: #{iface}
+                    exec: #{Enum.join(cmd, " ")}
+                    exit-status: #{n}
+                    output:
+                      #{String.replace(buf, ~r/\n/, "\n\t")}
+                  """
+
+                  {:reply,
+                   {:error, {:netbridge, network.ref}},
+                   state}
+
+                {:error, _} = err ->
+                  {:reply,
+                   err,
+                   state}
+              end
 
             {:error, _} = err ->
               {:reply,
@@ -708,9 +734,29 @@ defmodule Spew.Network do
                     _from,
                     %State{} = state) do
 
+      alias Spew.Utils.Net.Iface
+
       case State.getbyref "allocation-" <> allocref, state do
         {:ok, %Allocation{} = alloc} ->
           {:ok, newstate} = State.putbyref "allocation-" <> allocref, nil, state
+
+          # check if we should unprovision slice
+          {:ok, %Slice{} = slice} = State.getbyref "slice-" <> allocref, newstate
+          {:ok, %Network{ref: "net-" <> netref} = network}
+            = State.getbyref "net-" <> allocref, newstate
+
+          iface = slice.iface || network.iface || netref
+          case {map_size(slice.allocations), slice.active} do
+            {0, true} ->
+              Iface.remove_addrs iface, slice.ranges
+
+            {0, false} ->
+              Iface.remove_bridge iface
+
+            _ ->
+              :ok
+          end
+
           {:reply,
            {:ok, Allocation.disable(alloc)},
            newstate}
