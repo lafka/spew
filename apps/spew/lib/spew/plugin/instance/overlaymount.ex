@@ -76,15 +76,64 @@ defmodule Spew.Plugin.Instance.OverlayMount do
   end
 
   def notify(%Item{} = instance, %Mountpoint{} = mount, :start) do
-    if mounted? mount do
-      Logger.warn "instance[#{instance.ref}]: already mounted #{mount.mountpoint}"
-      {:error, {{:mounted, mount.mountpoint}, {:instance, instance.ref}}}
-    else
-      mount instance, mount
-    end
+    ensure_mount instance, mount
   end
 
   def notify(_instance, %Mountpoint{} = _mount, _ev), do: :ok
+
+  defp ensure_mount(%Item{ref: ref} = instance, %Mountpoint{mountpoint: mountpoint} = mount) do
+    [cmd | args] = ["mount"]
+    case System.cmd System.find_executable(cmd), args, [stderr_to_stdout: true] do
+      {buf, 0} ->
+        case Regex.run ~r/\w* on #{mountpoint}.*\n/, buf do
+          [match] ->
+            case String.split match, " " do
+              ["overlay", "on", ^mountpoint, "type", "overlay", opts] ->
+
+                lowerdirs = case pick_lowerdirs instance do
+                  {:ok, lowerdirs} -> lowerdirs
+                  {:error, _} -> []
+                end
+
+                match = String.split(opts, ~r/[(),]/, trim: true)
+                  |> Enum.reduce %Mountpoint{mountpoint: mountpoint}, fn
+                    ("lowerdir=" <> dirs, acc) ->
+                      %{acc | lowerdirs: String.split(dirs, ":")}
+
+                    ("upperdir=" <> dir, acc) ->
+                      %{acc | overlaydir: dir}
+
+                    ("workdir=" <> dir, acc) ->
+                      %{acc | workdir: dir}
+
+                    (_, acc) ->
+                      acc
+                  end
+
+                if match == %{mount | lowerdirs: lowerdirs} do
+                  :ok
+                else
+                  Logger.warn """
+                  mount[#{mountpoint}]: overlay already mounted
+                    existing: #{inspect match}
+                    netmount: #{inspect %{mount | lowerdirs: lowerdirs}}
+                  """
+                  {:error, {:mountopts, {:mountpoint, mountpoint}}}
+                end
+
+              [source, "on", ^mountpoint, _opts] ->
+                Logger.warn "mount[#{mountpoint}]: already mounted with #{source}"
+                {:error, {:mountopts, {:mountpoint, mountpoint}}}
+            end
+
+          nil ->
+            mount instance, mountpoint
+        end
+
+      {_buf, n} ->
+        {:error, {{:exit, n}, {:mountpoint, mountpoint}}}
+    end
+  end
 
 
   defp mount(%Item{ref: ref} = instance, %Mountpoint{} = mount) do
