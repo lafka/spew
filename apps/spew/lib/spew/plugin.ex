@@ -156,44 +156,66 @@ defmodule Spew.Plugin do
 
 
   defp pluginorder(caller, plugins) do
-    specs = pluginspecs caller, Enum.to_list(plugins), [], %{}
+    reqs = pluginspecs caller, Enum.to_list(plugins), [], []
     # Simple ordering, this will fuck up completely on complex stuff
     # but the plugins should check that the dependencies are ok
-    order = Enum.reduce specs, [], fn({plugin, spec}, acc) ->
-      case (spec[:after] || []) ++ [plugin | spec[:before] || []] do
-        [item] ->
-          if Enum.member? acc, item do
-            acc
-          else
-            [item]
-          end
 
-        items ->
-          case Enum.drop_while items, fn(item) -> ! Enum.member?(acc, item) end do
-            [item | _] ->
-              index = Enum.find_index acc, &(item == &1)
-              List.flatten(List.replace_at acc, index, items)
-            [] ->
-              acc ++ items
-          end
-      end
+
+    reqmap = Enum.reduce reqs, %{}, fn
+      ({p, :after, nil}, acc) ->
+        Map.put acc, p, acc[p] || []
+
+      ({p, :after, p2}, acc) ->
+        acc
+          |> Map.put(p, Enum.uniq [p2 | acc[p] || []])
+          |> Map.put(p2, acc[p2] || [])
+
+      ({p2, :before, p}, acc) ->
+        acc
+          |> Map.put(p, Enum.uniq [p2 | acc[p] || []])
+          |> Map.put(p2, acc[p2] || [])
     end
 
-    if Enum.uniq(order) !== order do
-      {:error, {:plugindeps, order}}
-    else
-      {:ok, Enum.map(order, fn(p) -> {p, plugins[p]} end)}
+    case resolvereqmap reqmap do
+      {:ok, order} ->
+        {:ok, Enum.map(order, fn(p) -> {p, plugins[p]} end)}
+
+      {:error, _} = res ->
+        res
     end
   end
 
-  defp loadorder({plugin, spec}, specs) do
+  defp resolvereqmap(map), do: resolvereqmap(map, [])
+  defp resolvereqmap(map, acc) when map == %{}, do: {:ok, Enum.reverse(acc)}
+  defp resolvereqmap(map, acc) do
+    {newmap, acc} = Enum.reduce map, {map, acc}, fn
+      ({plugin, []}, {map, acc}) ->
+        {Map.delete(map, plugin), [plugin | acc]}
+
+      ({plugin, deps}, {map, acc}) ->
+        case deps -- acc do
+          [] ->
+            {Map.delete(map, plugin), [plugin | acc]}
+          deps ->
+            {Map.put(map, plugin, deps), acc}
+        end
+    end
+
+    case newmap do
+      ^map ->
+        {:error, {:deps, map}}
+
+      newmap ->
+        resolvereqmap newmap, acc
+    end
   end
 
-  defp pluginspecs(_caller, [], _loaded, acc), do: acc
-  defp pluginspecs(caller, [{plugin, _}| rest], loaded, acc) do
-    pluginspecs caller, [plugin | rest], loaded, acc
+  defp pluginspecs(_caller, [], _loaded, reqs), do: reqs
+  defp pluginspecs(caller, [{plugin, _}| rest], loaded, reqs) do
+    pluginspecs caller, [plugin | rest], loaded, reqs
   end
-  defp pluginspecs(caller, [plugin | rest], loaded, specs) when is_atom(plugin) do
+  defp pluginspecs(caller, [plugin | rest], loaded, reqs) when is_atom(plugin) do
+    require Logger
     spec = plugin.spec caller
 
     # Check that the requirement is not loaded, and if so push make it load next
@@ -205,8 +227,14 @@ defmodule Spew.Plugin do
       end
     end
 
-    spec = Dict.delete spec, :require
+    appendreqs = Enum.map(spec[:after] || [], fn(dep) -> {plugin, :after, dep} end) ++
+                 Enum.map(spec[:before] || [], fn(dep) -> {plugin, :before, dep} end)
+    case appendreqs do
+      [] ->
+        pluginspecs caller, rest, [plugin | loaded], [{plugin, :after, nil} | reqs]
 
-    pluginspecs caller, rest, [plugin | loaded], Map.put_new(specs, plugin, spec)
+      appendreqs ->
+        pluginspecs caller, rest, [plugin | loaded], appendreqs ++ reqs
+    end
   end
 end

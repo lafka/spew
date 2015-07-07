@@ -160,6 +160,19 @@ defmodule SpewPluginTest do
       def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
-    assert {:error, {:plugindeps, _}} = Plugin.init __MODULE__, [CircularPlugin1, CircularPlugin2]
+    assert {:error, {:deps, %{
+      CircularPlugin1 => [CircularPlugin2],
+      CircularPlugin2 => [CircularPlugin1]
+    }}} = Plugin.init __MODULE__, [CircularPlugin2]
+
+    assert {:error, {:deps, %{
+      CircularPlugin1 => [CircularPlugin2],
+      CircularPlugin2 => [CircularPlugin1]
+    }}} = Plugin.init __MODULE__, [CircularPlugin1]
+
+    assert {:error, {:deps, %{
+      CircularPlugin1 => [CircularPlugin2],
+      CircularPlugin2 => [CircularPlugin1]
+    }}} = Plugin.init __MODULE__, [CircularPlugin1, CircularPlugin2]
   end
 end
