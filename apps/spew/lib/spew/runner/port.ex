@@ -170,7 +170,8 @@ defmodule Spew.Runner.Port do
         send who, {returnref, :stopping}
         # Ask nicely for port to quit
         {:os_pid, ospid} = Port.info(port, :os_pid)
-        case System.cmd System.find_executable("sudo"), ["kill", "-s", signal, "#{ospid}"] do
+
+        case System.cmd System.find_executable("kill"), ["-s", signal, "#{ospid}"] do
           {"", 0} ->
             Port.close port
 
