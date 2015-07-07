@@ -410,7 +410,8 @@ defmodule Spew.Instance do
         true when not hasinstance? ->
           instance = %{spec | ref: ref = Spew.Utils.hash(spec)}
 
-          case Spew.Plugin.init spec, spec.plugin do
+          plugins = Map.put spec.plugin, spec.runner, nil
+          case Spew.Plugin.init spec, plugins do
             {:ok, plugins} ->
               instance = %{instance | plugin: plugins}
               instances = Map.put state.instances, instance.ref, instance
