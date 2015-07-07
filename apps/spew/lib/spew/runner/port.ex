@@ -110,6 +110,14 @@ defmodule Spew.Runner.Port do
                            plugin: plugins}}
 
           {^retref, {:initexit, reason}, buf} ->
+
+            Logger.info """
+            instance[#{ref}: exit on init: #{inspect reason}
+
+            ```
+            #{buf}
+            ```
+            """
             {:error, {:initexit, reason, buf, {:instance, ref}}}
 
           {:DOWN, ^monref, :process, ^pid, reason} ->
