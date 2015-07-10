@@ -26,7 +26,7 @@ defmodule Spew.Plugin.Instance.Build do
     - verify build
     - async unpack
   """
-  def init(_instance, _opts) do
+  def init(_instance, _plugin, _opts) do
     Logger.debug "instance[#{_instance.ref}]: init plugin #{__MODULE__}"
     {:ok, nil}
   end
@@ -35,7 +35,7 @@ defmodule Spew.Plugin.Instance.Build do
   Cleanup build:
     - remove the actual build
   """
-  def cleanup(_instance, _state) do
+  def cleanup(_instance, _state, _opts) do
     Logger.debug "instance[#{_instance.ref}]: cleanup after plugin #{__MODULE__}"
     :ok
   end

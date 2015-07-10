@@ -9,7 +9,7 @@ defmodule SpewPluginTest do
 
       def spec(SpewPluginTest), do: []
 
-      def init(SpewPluginTest, nil) do
+      def init(SpewPluginTest, nil, _opts) do
         {:ok, spawn fn -> loop end}
       end
 
@@ -34,7 +34,7 @@ defmodule SpewPluginTest do
         :ok
       end
 
-      def cleanup(SpewPluginTest, pid) do
+      def cleanup(SpewPluginTest, pid, _opts) do
         ref = make_ref
         send pid, {:stop, {self, ref}}
         receive do
@@ -66,12 +66,12 @@ defmodule SpewPluginTest do
       use Spew.Plugin
 
       def spec(_), do: [ ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     # This will run B unless A is enabled, then A will run first
@@ -79,12 +79,12 @@ defmodule SpewPluginTest do
       use Spew.Plugin
 
       def spec(_), do: [ after: [PluginA] ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     # This will run C, A, B
@@ -93,12 +93,12 @@ defmodule SpewPluginTest do
 
       def spec(_), do: [ require: [PluginB],
                          before: [PluginA] ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     # this should run A, then B, and afterwards C, D in any order
@@ -107,12 +107,12 @@ defmodule SpewPluginTest do
 
       def spec(_), do: [ require: [PluginA, PluginC,],
                          after: [PluginB] ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     {:ok, plugins} = Plugin.init __MODULE__, [PluginD]
@@ -139,12 +139,12 @@ defmodule SpewPluginTest do
 
       def spec(_), do: [ after: [SpewPluginTest.CircularPlugin2],
                          require: [SpewPluginTest.CircularPlugin2] ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     defmodule CircularPlugin2 do
@@ -152,12 +152,12 @@ defmodule SpewPluginTest do
 
       def spec(_), do: [ after: [CircularPlugin1],
                          require: [CircularPlugin1] ]
-      def init(_caller, _opts) do
+      def init(_caller, _plugin, _opts) do
         Process.put({__MODULE__, :init}, t = :erlang.monotonic_time)
         {:ok, t}
       end
       def notify(_caller, _state, _ev), do: :ok
-      def cleanup(_caller, _), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
+      def cleanup(_caller, _state, _opts), do: Process.put({__MODULE__, :cleanup}, :erlang.monotonic_time)
     end
 
     assert {:error, {:deps, %{

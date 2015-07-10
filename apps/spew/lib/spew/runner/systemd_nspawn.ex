@@ -145,7 +145,7 @@ defmodule Spew.Runner.SystemdNspawn do
   @doc """
   Plugin init
   """
-  def init(%Item{ref: ref}, _opts) do
+  def init(%Item{ref: ref}, _plugin, _opts) do
     Logger.debug "instance[#{ref}]: init plugin #{__MODULE__}"
     {:ok, nil}
   end
@@ -155,7 +155,7 @@ defmodule Spew.Runner.SystemdNspawn do
 
   Making sure the machine is dead using machined calls
   """
-  def cleanup(%Item{ref: ref}, _state) do
+  def cleanup(%Item{ref: ref}, _state, _opts) do
     Logger.debug "instance[#{ref}]: cleanup after plugin #{__MODULE__}"
     :ok
   end

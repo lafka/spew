@@ -278,12 +278,12 @@ defmodule Spew.Runner.Port do
   @doc """
   Plugin init, unused
   """
-  def init(_instance, _opts), do: {:ok, nil}
+  def init(_instance, _plugin, _opts), do: {:ok, nil}
 
   @doc """
   Handle cleanup of self
   """
-  def cleanup(_instance, _state), do: :ok
+  def cleanup(_instance, _state, _opts), do: :ok
 
   @doc """
   Handle plugin events

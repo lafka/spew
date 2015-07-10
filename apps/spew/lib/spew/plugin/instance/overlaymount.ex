@@ -39,7 +39,7 @@ defmodule Spew.Plugin.Instance.OverlayMount do
   Plugin init:
     - create required directories
   """
-  def init(%Item{} = instance, _opts) do
+  def init(%Item{} = instance, _plugin, _opts) do
     Logger.debug "instance[#{instance.ref}]: init plugin #{__MODULE__}"
     basedir = Path.join [Application.get_env(:spew, :spewroot), "instance", instance.ref]
     mount = %Mountpoint{
@@ -61,7 +61,7 @@ defmodule Spew.Plugin.Instance.OverlayMount do
   Cleanup build:
     - Ensure everything is unmounted
   """
-  def cleanup(%Item{ref: ref} = instance, %Mountpoint{} = mount) do
+  def cleanup(%Item{ref: ref} = instance, %Mountpoint{} = mount, _opts) do
     Logger.debug "instance[#{ref}]: cleanup after plugin #{__MODULE__}"
     unmount instance, mount
   end

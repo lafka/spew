@@ -55,9 +55,9 @@ defmodule Spew.Plugin do
 
   use Behaviour
 
-  defcallback init(caller, term) :: {:ok, state} | {:error, {plugin, term}}
+  defcallback init(caller, term, [term]) :: {:ok, state} | {:error, {plugin, term}}
   defcallback notify(caller, pluginstate, event) :: :ok | {:update, pluginstate} | {:error, term}
-  defcallback cleanup(caller, pluginstate) :: :ok
+  defcallback cleanup(caller, pluginstate, [term]) :: :ok
   defcallback spec(caller) :: [{:before, [plugin]} | {:after, [plugin]} | {:require, [plugin]}]
 
   defmacro __using__(_) do
@@ -71,23 +71,23 @@ defmodule Spew.Plugin do
 
   Plugins are ordered according to the return of the `spec/1` callback
   """
-  @spec init(caller, [plugin | {plugin, term}]) :: {:ok, state} | {:error, term}
-  def init(caller, plugins) do
+  @spec init(caller, [plugin | {plugin, term}], [term]) :: {:ok, state} | {:error, term}
+  def init(caller, plugins, opts \\ []) do
     case pluginorder caller, plugins do
       {:ok, plugins} ->
-        init2 caller, plugins, %{}
+        init2 caller, opts, plugins, %{}
 
       {:error, _} = res ->
         res
     end
   end
 
-  defp init2(_caller, [], plugins), do: {:ok, plugins}
+  defp init2(_caller, _opts, [], plugins), do: {:ok, plugins}
 
-  defp init2(caller, [{plugin, opts} | rest], plugins) do
-    case plugin.init caller, opts do
+  defp init2(caller, opts, [{plugin, plugopts} | rest], plugins) do
+    case plugin.init caller, plugopts, opts do
       {:ok, pluginstate} ->
-        init2 caller, rest, Map.put(plugins, plugin, pluginstate)
+        init2 caller, opts, rest, Map.put(plugins, plugin, pluginstate)
 
       {:error, err} ->
         {:error, {plugin, err}}
@@ -97,8 +97,8 @@ defmodule Spew.Plugin do
     end
   end
 
-  defp init2(caller, [plugin | rest], plugins) when is_atom(plugin) do
-    init2 caller, [{plugin, nil} | rest], plugins
+  defp init2(caller, opts, [plugin | rest], plugins) when is_atom(plugin) do
+    init2 caller, opts, [{plugin, nil} | rest], plugins
   end
 
 
@@ -134,23 +134,23 @@ defmodule Spew.Plugin do
 
   Plugin cleanup is called in reverse order of their initialization
   """
-  @spec cleanup(caller, state) :: :ok
-  def cleanup(caller, plugins) do
+  @spec cleanup(caller, state, [term]) :: :ok
+  def cleanup(caller, plugins, opts \\ []) do
     case pluginorder caller, plugins do
       {:ok, plugins} ->
         plugins = Enum.reverse plugins
-        cleanup2 caller, plugins
+        cleanup2 caller, opts, plugins
 
       {:error, _} = res ->
         res
     end
   end
 
-  defp cleanup2(_caller, []), do: :ok
+  defp cleanup2(_caller, _opts, []), do: :ok
 
-  defp cleanup2(caller, [{plugin, state} | rest]) do
-    plugin.cleanup caller, state
-    cleanup2 caller, rest
+  defp cleanup2(caller, opts, [{plugin, state} | rest]) do
+    plugin.cleanup caller, state, opts
+    cleanup2 caller, opts, rest
   end
 
 

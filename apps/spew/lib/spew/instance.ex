@@ -156,8 +156,8 @@ defmodule Spew.Instance do
   @doc """
   Add a new instance
   """
-  def add(name, %Item{} = spec, server \\ @name), do:
-    GenServer.call(server, {:add, %{spec | name: name}})
+  def add(name, %Item{} = spec, opts \\ [], server \\ @name), do:
+    GenServer.call(server, {:add, %{spec | name: name}, opts})
 
   @doc """
   Retrieve a existing instance
@@ -183,7 +183,7 @@ defmodule Spew.Instance do
       true === opts[:kill?] ->
         case kill ref, Dict.put(opts, :wait_for_exit, true), server do
           {:ok, _spec} ->
-            GenServer.call(server, {:delete, ref})
+            GenServer.call(server, {:delete, ref, opts})
 
           {:error, _} = res ->
             res
@@ -192,14 +192,14 @@ defmodule Spew.Instance do
       true === opts[:stop?] ->
         case stop ref, Dict.put(opts, :wait_for_exit, true), server do
           {:ok, _spec} ->
-            GenServer.call(server, {:delete, ref})
+            GenServer.call(server, {:delete, ref, opts})
 
           {:error, _} = res ->
             res
         end
 
       true ->
-        GenServer.call(server, {:delete, ref})
+        GenServer.call(server, {:delete, ref, opts})
     end
   end
 
@@ -401,9 +401,9 @@ defmodule Spew.Instance do
       {:ok, %State{}}
     end
 
-    def handle_call({:add, %{ref: ref}}, _from, state) when ref !== nil, do:
+    def handle_call({:add, %{ref: ref}, _opts}, _from, state) when ref !== nil, do:
       {:reply, {:error, :ref_not_nil}, state}
-    def handle_call({:add, spec}, _from, state) do
+    def handle_call({:add, spec, opts}, _from, state) do
       hasinstance? = nil !== state.instances[spec.ref || Spew.Utils.hash(spec)]
 
       case Item.runnable? spec, true do
@@ -411,7 +411,7 @@ defmodule Spew.Instance do
           instance = %{spec | ref: ref = Spew.Utils.hash(spec)}
 
           plugins = Map.put spec.plugin, spec.runner, nil
-          case Spew.Plugin.init spec, plugins do
+          case Spew.Plugin.init spec, plugins, opts do
             {:ok, plugins} ->
               instance = %{instance | plugin: plugins}
               instances = Map.put state.instances, instance.ref, instance
@@ -423,7 +423,7 @@ defmodule Spew.Instance do
               {:reply, {:ok, state.instances[ref]}, state}
 
             {:error, {:invalid_return, err, {:plugin, p}}} ->
-              Spew.Plugin.cleanup spec, spec.plugin
+              Spew.Plugin.cleanup spec, spec.plugin, opts
               {:error, {err, {:plugin, p}}}
           end
 
@@ -445,7 +445,7 @@ defmodule Spew.Instance do
       end
     end
 
-    def handle_call({:delete, ref}, _from, state) do
+    def handle_call({:delete, ref, opts}, _from, state) do
       case state.instances[ref] do
         nil ->
           {:reply, {:error, {:notfound, {:instance, ref}}}, state}
@@ -454,7 +454,7 @@ defmodule Spew.Instance do
           {:ok, %{instances: instances} = state} = State.notify state, ref, :delete
 
           # tell plugins to cleanup
-          case Spew.Plugin.cleanup instances[ref], instances[ref].plugin do
+          case Spew.Plugin.cleanup instances[ref], instances[ref].plugin, opts do
             :ok ->
               {:reply,
                {:ok, state.instances[ref]},
@@ -511,13 +511,13 @@ defmodule Spew.Instance do
       end
 
       # Don't break on bad hooks
-      res = try do callbacks [instance], instance.hooks[:start] || []
+      res = try do callbacks [instance, opts], instance.hooks[:start] || []
             catch e -> {:error, e} end
 
       cleanup = fn(instance, reason) ->
         try do
-          callbacks [instance, reason], instance.hooks[:stop] || [], false
-          Spew.Plugin.cleanup instance, instance.plugin
+          callbacks [instance, reason, opts], instance.hooks[:stop] || [], false
+          Spew.Plugin.cleanup instance, instance.plugin, opts
         catch
           e -> {:error, e}
         end
@@ -528,7 +528,7 @@ defmodule Spew.Instance do
         plugins = Map.put instance.plugin, instance.runner, nil
         Logger.debug "instance[#{instance.ref}]: initializing plugins: #{Enum.join(Map.keys(plugins), ", ")}"
 
-        case Spew.Plugin.init instance, plugins do
+        case Spew.Plugin.init instance, plugins, opts do
           {:ok, plugins} ->
             instance = %{instance | plugin: plugins}
             instances = Map.put state.instances, instance.ref, instance
@@ -536,7 +536,7 @@ defmodule Spew.Instance do
             {:ok, %{state | instances: instances}, instance}
 
           {:error, {:invalid_return, err, {:plugin, p}}} ->
-            Spew.Plugin.cleanup instance, instance.plugin
+            Spew.Plugin.cleanup instance, instance.plugin, opts
             {{:error, {err, {:plugin, p}}}, state, instance}
         end
       else

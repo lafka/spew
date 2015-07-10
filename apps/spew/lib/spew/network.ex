@@ -75,6 +75,8 @@ defmodule Spew.Network do
     Utils.hash(term) |> String.slice(0, 8)
   end
 
+  def server, do: @name
+
 
   @doc """
   Create a new network
@@ -93,6 +95,13 @@ defmodule Spew.Network do
     GenServer.call server, {:get, network}
   end
 
+  @doc """
+  Get a network definition by it's name
+  """
+  @spec get_by_name(String.t, GenServer.server) :: {:ok, t} | {:error, term}
+  def get_by_name(netname, server \\ @name) do
+    GenServer.call server, {:get_by_name, netname}
+  end
 
   @doc """
   Delete a network
@@ -522,6 +531,24 @@ defmodule Spew.Network do
         nil ->
           {:reply,
            {:error, {:notfound, "net-" <> ref}},
+           state}
+
+        network ->
+          {:reply,
+           {:ok, network},
+           state}
+      end
+    end
+
+
+    def handle_call({:get_by_name,  name},
+                    _from,
+                    %State{networks: networks} = state) do
+
+      case Enum.find networks, fn(%Network{name: match}) -> match == name  end do
+        nil ->
+          {:reply,
+           {:error, {:notfound, {:network_name, name}}},
            state}
 
         network ->
