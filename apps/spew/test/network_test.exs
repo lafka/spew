@@ -138,8 +138,7 @@ defmodule SpewNetworkTest do
 
   end
   test "auto-(create,delete) bridge", ctx do
-    name = "testautobr"
-    network = %Network{name: name,
+    network = %Network{name: "#{ctx[:test]}",
                        ranges: ["fe00::f:1/112#124"]}
 
 

@@ -93,8 +93,7 @@ defmodule Spew.Utils.Net do
             maybe_sudo ++ ["ip", "addr", "add", "local", "#{ip}/#{mask}", "dev", iface]
           end
 
-          cmds = [maybe_sudo ++ ["brctl", "addbr", iface] | addrs]
-
+          cmds = [maybe_sudo ++ ["ip", "link", "add", iface, "type", "bridge"] | addrs]
           untilerr cmds, :ok, &syscmd/1
       end
     end
@@ -106,7 +105,7 @@ defmodule Spew.Utils.Net do
     def remove_bridge(iface) do
       cmds = [
         maybe_sudo ++ ["ip", "link", "set", "down", "dev", iface],
-        maybe_sudo ++ ["brctl", "delbr", iface],
+        maybe_sudo ++ ["ip", "link", "del", iface] # this may orphan a bunch of devices
       ]
       untilerr cmds, :ok, &syscmd/1
     end
