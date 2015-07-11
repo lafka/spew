@@ -545,13 +545,13 @@ defmodule Spew.Network do
                     _from,
                     %State{networks: networks} = state) do
 
-      case Enum.find networks, fn(%Network{name: match}) -> match == name  end do
+      case Enum.find networks, fn({_, %Network{name: match}}) -> match == name  end do
         nil ->
           {:reply,
            {:error, {:notfound, {:network_name, name}}},
            state}
 
-        network ->
+        {_netref, network} ->
           {:reply,
            {:ok, network},
            state}

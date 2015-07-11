@@ -39,6 +39,7 @@ defmodule Spew.Network.Allocation do
     ref: allocation,
     owner: owner,
     state: :active | :inactive,
+    addresses: [{:inet.ip_address, 0..128}],
     tags: [String.t]
   }
 
@@ -99,11 +100,11 @@ defmodule Spew.Network.Allocation do
     end
   end
 
-  defp allocate2(allocations, {ip, _mask} = inet, owner, n) do
+  defp allocate2(allocations, {ip, mask} = inet, owner, n) do
     n = n + 1
     ip = InetAddress.increment ip, n
     if free? allocations, ip do
-      ip
+      {ip, mask}
     else
       # just loop until we find one...
       allocate2 allocations, inet, owner, n

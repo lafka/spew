@@ -127,7 +127,7 @@ defmodule Spew.Plugin.Instance.OverlayMount do
             end
 
           nil ->
-            mount instance, mountpoint
+            mount instance, mount
         end
 
       {_buf, n} ->
@@ -166,6 +166,9 @@ defmodule Spew.Plugin.Instance.OverlayMount do
 
       {:error, _} = res ->
         res
+
+      nil ->
+        :ok
     end
   end
 
@@ -179,6 +182,10 @@ defmodule Spew.Plugin.Instance.OverlayMount do
 
   defp pick_lowerdirs(%Item{runtime: {:build, chroot}}) do
     {:error, {:buildsnotintegrate}}
+  end
+
+  defp pick_lowerdirs(%Item{runtime: nil}) do
+    nil
   end
 
   defp mounted?(%Mountpoint{mountpoint: mountpoint}) do

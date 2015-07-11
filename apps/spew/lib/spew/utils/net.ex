@@ -66,36 +66,38 @@ defmodule Spew.Utils.Net do
       case stats iface do
         {:ok, %Iface{addrs: addrs}} ->
           # check my ranges
-          errors = Enum.filter ranges, fn({ip, mask}) ->
-            ip = InetAddress.to_string ip
-            ! Map.has_key?(addrs, ip) || addrs[ip][:netmask] !== mask
-          end
+          cmds = Enum.reduce ranges, [], fn
+            ({ip, mask}, cmds) ->
+              ip = InetAddress.to_string ip
+              if ! Map.has_key?(addrs, ip) || addrs[ip][:netmask] !== mask do
+                [maybe_sudo ++ ["ip", "addr", "add", "#{ip}/#{mask}", "dev", iface] | cmds]
+              else
+                cmds
+              end
+            end
 
-          case errors do
-            [] ->
-              cmds = [maybe_sudo ++ ["ip", "link", "set", "up", "dev", iface]]
-              untilerr cmds, :ok, &syscmd/1
-
-            errs ->
-              Logger.error """
-              iface[#{iface}]: configured but lacks setup for:
-                #{Enum.map(ranges, fn({ip,mask}) -> "\t* #{InetAddress.to_string(ip)}/#{mask}\n" end)}
-              current configuration:
-                #{Enum.map(addrs, fn({_,%{addr: ip, netmask: mask}}) -> "\t* #{InetAddress.to_string(ip)}/#{mask}\n" end)}
-              """
-
-              {:error, {{:noaddr, errs}, {:iface, iface}}}
-          end
+          cmds = [maybe_sudo ++ ["ip", "link", "set", "up", "dev", iface] | cmds]
+          untilerr Enum.reverse(cmds), :ok, &syscmd/1
 
         {:error, {:notfound, {:iface, _}}} ->
           addrs = Enum.map ranges, fn({ip, mask}) ->
             ip = InetAddress.to_string ip
-            maybe_sudo ++ ["ip", "addr", "add", "local", "#{ip}/#{mask}", "dev", iface]
+            maybe_sudo ++ ["ip", "addr", "add", "#{ip}/#{mask}", "dev", iface]
           end
 
-          cmds = [maybe_sudo ++ ["ip", "link", "add", iface, "type", "bridge"] | addrs]
+          hwaddr = macaddr iface
+          cmds = [maybe_sudo ++ ["ip", "link", "add", iface, "address", hwaddr, "type", "bridge"] | addrs]
           untilerr cmds, :ok, &syscmd/1
       end
+    end
+
+
+    defp macaddr(ref) do
+      <<a,b,c,d,e,_ :: binary>> = :erlang.term_to_binary ref
+      [52, a, b, c, d, e]
+        |> Enum.map(&Integer.to_string(&1, 16))
+        |> Enum.join(":")
+        |> String.downcase
     end
 
     @doc """

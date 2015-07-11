@@ -37,7 +37,7 @@ defmodule SpewNetworkTest do
   test "slice delegation (delegate, slices, slice, undelegate)", ctx do
     name = "slice-delegation"
     network = %Network{name: name,
-                       ranges: ["fe00::a:1/112#124"]}
+                       ranges: ["fe00::a:1/48#59"]}
 
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
@@ -57,7 +57,7 @@ defmodule SpewNetworkTest do
   test "inet allocatation (allocate, deallocate, allocation, allocations)", ctx do
     name = "ip-allocation"
     network = %Network{name: name,
-                       ranges: ["fe00::b:1/112#124"]}
+                       ranges: ["fe00::b:1/48#59"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -88,7 +88,7 @@ defmodule SpewNetworkTest do
     name = "network-over-delegation"
     range = "fe00::c:1/126"
     network = %Network{name: name,
-                       ranges: ["#{range}#127", "fe00::d:1/112#120"]}
+                       ranges: ["#{range}#127", "fe00::d:1/48#59"]}
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
     {:ok, [network]} = Network.networks server
@@ -139,7 +139,7 @@ defmodule SpewNetworkTest do
   end
   test "auto-(create,delete) bridge", ctx do
     network = %Network{name: "#{ctx[:test]}",
-                       ranges: ["fe00::f:1/112#124"]}
+                       ranges: ["fe00::f:1/48#59"]}
 
 
     {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
@@ -152,7 +152,7 @@ defmodule SpewNetworkTest do
 
     # * create a bridge on allocation
     {:ok, alloc} = Network.allocate slice.ref, "addr-1", server
-    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+    assert {:ok, %Iface{addrs: %{"fe00::ade0:0:0:f:1" => ^sliceiface}}} = Iface.stats iface
 
     # * on removal of all allocation, the address is removed
     {:ok, _} = Network.deallocate alloc.ref, server
@@ -166,10 +166,10 @@ defmodule SpewNetworkTest do
     # * on slice undelegation with active allocations the bridge is # kept
     {:ok, slice} = Network.delegate network.ref, [owner: "slice", iface: iface], server
     {:ok, alloc} = Network.allocate slice.ref, "addr-1", server
-    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+    assert {:ok, %Iface{addrs: %{"fe00::ade0:0:0:f:1" => ^sliceiface}}} = Iface.stats iface
 
     {:ok, _} = Network.undelegate slice.ref, server
-    assert {:ok, %Iface{addrs: %{"fe00::f:d6f1" => ^sliceiface}}} = Iface.stats iface
+    assert {:ok, %Iface{addrs: %{"fe00::ade0:0:0:f:1" => ^sliceiface}}} = Iface.stats iface
 
     # -> until last allocation is deleted when the bridge is removed
     {:ok, _} = Network.deallocate alloc.ref, server
