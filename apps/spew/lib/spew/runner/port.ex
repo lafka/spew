@@ -230,10 +230,7 @@ defmodule Spew.Runner.Port do
       {^returnref, :stopping} ->
         {:ok, %{spec | state: {:stopping, Time.now(:milli_seconds)}}}
 
-      {:DOWN, ^monref, :process, ^pid, :normal} ->
-        {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
-
-      {:DOWN, ^monref, :process, ^pid, :noproc} ->
+      {:DOWN, ^monref, :process, ^pid, reason} when reason in [:normal, :noproc] ->
         {:ok, %{spec | state: {:stopped, Time.now(:milli_seconds)}}}
 
       {:DOWN, ^monref, :process, ^pid, reason} ->

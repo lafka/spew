@@ -85,10 +85,18 @@ defmodule Spew.Build do
         ^checksum ->
           case Spew.Utils.File.trusted? archive, signature do
             :ok ->
-              Logger.debug "build[#{build.ref}]: extracting to #{target}"
+              Logger.debug "build[#{build.ref}]: extracting #{archive} to #{target}"
               File.mkdir_p! target
-              :ok = :erl_tar.extract archive, [:compressed, {:cwd, target}]
-              {:ok, target}
+              # :keep_old_files to avoid :eaccess when re-unpacking
+              case :erl_tar.extract archive, [:compressed,
+                                             {:cwd, target},
+                                             :keep_old_files] do
+                :ok ->
+                  {:ok, target}
+
+                  {:error, posixerr} when is_atom(posixerr) ->
+                    {:error, {posixerr, {:build, build.ref}}}
+              end
 
             {:error, reason} ->
               {:error, {{:untrusted, reason}, {:build, build.ref}}}

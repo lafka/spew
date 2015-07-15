@@ -8,6 +8,8 @@ defmodule Spew.Plugin.Instance.Build do
   require Logger
 
   alias Spew.Instance.Item
+  alias Spew.Build
+  alias Spew.Build.Server
 
   @doc """
   Spec for Build plugin
@@ -17,7 +19,7 @@ defmodule Spew.Plugin.Instance.Build do
 
     [
       require: [OverlayMount], # If we have a build we have a overlay
-      before:  [OverlayMount] # run before on load, and after on cleanup
+      before:  [OverlayMount]
     ]
   end
 
@@ -26,22 +28,49 @@ defmodule Spew.Plugin.Instance.Build do
     - verify build
     - async unpack
   """
-  def init(_instance, _plugin, _opts) do
-    Logger.debug "instance[#{_instance.ref}]: init plugin #{__MODULE__}"
-    {:ok, nil}
+  def init(%Item{runtime: {:build, {:ref, buildref}}} = instance, _plugin, opts) do
+    buildserver = opts[Server] || Build.server
+    case Build.get buildref, buildserver do
+      {:ok, build} ->
+        targetdir = Path.join [Application.get_env(:spew, :spewroot), "build", build.ref]
+
+        task = Task.async fn ->
+          Build.Item.unpack build, targetdir
+        end
+
+        {:ok, %{
+          buildref: buildref,
+          rootdir: targetdir,
+          unpacker: task,
+          unpacked?: false
+        }}
+      {:error, err} ->
+        {:error, {err, {:instance, instance.ref}}}
+    end
+  end
+  def init(%Item{runtime: _} = instance, _plugin, _opts) do
+    :ignore
   end
 
   @doc """
-  Cleanup build:
-    - remove the actual build
+  No-op, builds are kept until manually removed.
   """
-  def cleanup(_instance, _state, _opts) do
-    Logger.debug "instance[#{_instance.ref}]: cleanup after plugin #{__MODULE__}"
-    :ok
-  end
+  def cleanup(instance, _state, _opts), do: :ok
 
   @doc """
   Handle plugin events
   """
+  def notify(_instance, %{unpacker: task} = state, :start) do
+    case state[:unpacked?] || Task.await task, :infinity do
+      true ->
+        :ok
+
+      {:ok, _targetdir} ->
+        {:update, %{state | unpacked?: true}}
+
+      {:error, _} =res ->
+        res
+    end
+  end
   def notify(_instance, _state, _ev), do: :ok
 end

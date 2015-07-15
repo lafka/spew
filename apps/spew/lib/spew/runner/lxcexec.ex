@@ -23,8 +23,6 @@ defmodule Spew.Runner.LXCExec do
   use Spew.Plugin
   use Spew.Runner
 
-  require Logger
-
   alias Spew.Instance.Item
   alias Spew.Runner.Port, as: PortRunner
 
@@ -86,14 +84,6 @@ defmodule Spew.Runner.LXCExec do
         buf <> k <> " = " <> v <> "\n"
       end
 
-      Logger.debug """
-      LXCExec.save_config:
-
-      #{file}
-      ---
-      #{buf}
-      ---
-      """
       case File.write file, buf do
         :ok ->
           {:ok, file}
@@ -140,7 +130,14 @@ defmodule Spew.Runner.LXCExec do
 
         cmd = maybe_sudo ++ ["lxc-execute", "-n", name, "-f", file, "--" | exec]
 
-        PortRunner.run %{instance | command: cmd}, opts
+        case PortRunner.run %{instance | command: cmd}, opts do
+          {:ok, newinstance} ->
+            # reset command to original state
+            {:ok, %{newinstance | command: instance.command}}
+
+          {:error, res} ->
+            res
+        end
 
       {:error, _} = res ->
         res
@@ -155,10 +152,6 @@ defmodule Spew.Runner.LXCExec do
     executable = System.find_executable("init.lxc")
     initfiles = [executable | Spew.Utils.Executable.ldd executable]
 
-    Logger.debug """
-    instance[#{item.ref}: adding init.lxc files to system
-      * #{Enum.join(initfiles, "\n\t* ")}
-    """
 
     :ok = File.mkdir_p Path.join(root, "proc")
     :ok = File.mkdir_p Path.join([root, "dev", "shm"])
@@ -166,7 +159,6 @@ defmodule Spew.Runner.LXCExec do
     untilerr initfiles, nil, fn(file) ->
       case File.mkdir_p p = Path.join(root, Path.dirname(file)) do
         :ok ->
-          Logger.debug "copy #{file} -> #{p}"
           File.cp file, Path.join(root, file)
 
         {:error, e} ->
@@ -251,7 +243,10 @@ defmodule Spew.Runner.LXCExec do
     end
   end
 
-  def stop(%Item{} = instance, signal), do: PortRunner.stop(instance, signal)
+  def stop(%Item{} = instance, signal) do
+    PortRunner.stop(instance, signal)
+  end
+  def kill(%Item{} = instance), do: PortRunner.kill(instance)
 
   # Spew.Plugin callbacks
   @doc """
@@ -279,8 +274,6 @@ defmodule Spew.Runner.LXCExec do
   Plugin init
   """
   def init(%Item{ref: ref} = instance, _plugin, _opts) do
-    Logger.debug "instance[#{ref}]: init plugin #{__MODULE__}"
-
     name = String.replace instance.name || instance.ref, ~r/[^a-zA-Z0-9_-]/, ""
 
     basedir = Path.join [Application.get_env(:spew, :spewroot), "instance", instance.ref]

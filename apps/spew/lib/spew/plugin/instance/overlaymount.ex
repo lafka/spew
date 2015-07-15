@@ -180,8 +180,11 @@ defmodule Spew.Plugin.Instance.OverlayMount do
     end
   end
 
-  defp pick_lowerdirs(%Item{runtime: {:build, chroot}}) do
-    {:error, {:buildsnotintegrate}}
+  defp pick_lowerdirs(%Item{runtime: {:build, _}} = instance ) do
+    alias Spew.Plugin.Instance.Build
+
+    %{rootdir: chroot} = instance.plugin[Build]
+    {:ok, [chroot]}
   end
 
   defp pick_lowerdirs(%Item{runtime: nil}) do

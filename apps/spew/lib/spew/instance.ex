@@ -246,14 +246,17 @@ defmodule Spew.Instance do
     end
 
     case GenServer.call(server, {:stop, ref, options[:signal]}) do
-      {:ok, _spec} when waitforexit? ->
+      {:ok, %Item{state: {{state, _}, _}}} = res when state in [:stopped, :crashed] ->
+        res
+
+      {:ok, %Item{}} when waitforexit? ->
         receive do
           {:ev, ^ref, {:stop, _}} -> get ref, server
         after
           exit_timeout -> {:error, {:timeout, {:instance, {:stop, ref}}}}
         end
 
-      {:ok, _spec} ->
+      {:ok, %Item{} = _spec} ->
         get ref, server
 
       {:error, _} = res ->
@@ -373,7 +376,7 @@ defmodule Spew.Instance do
             publish.(state)
             {:ok, state}
 
-          {:error, {plugin, err}, remaining, instance} when false == strict ->
+          {:error, {plugin, err}, remaining, %Item{} = instance} when false == strict ->
             Logger.warn """
             instance[#{ref}]: plugin error #{plugin}:
               error: #{inspect err}
@@ -384,7 +387,7 @@ defmodule Spew.Instance do
             publish.(state)
             {:ok, state}
 
-          {:error, {plugin, err}, remaining, instance} when true == strict ->
+          {:error, {plugin, err}, remaining, %Item{} = instance} when true == strict ->
             state = %{state | instances: Map.put(state.instances, ref, instance)}
             {:error, {err, {:plugin, plugin}}, state}
         end
@@ -545,7 +548,7 @@ defmodule Spew.Instance do
 
       case res do
         :ok ->
-          {err, state} = case State.notify(%{state | instances: instances},
+          {err, state} = case State.notify(state,
                                            instance.ref,
                                            :start,
                                            true) do
@@ -592,7 +595,10 @@ defmodule Spew.Instance do
         nil ->
           {:reply, {:error, {:notfound, {:instance, ref}}}, state}
 
-        spec ->
+        %Item{state: {{reason, _}, _}} = instance when state in [:crashed, :stopping, :stopped]->
+          {:reply, {:ok, instance}, state}
+
+        %Item{} = spec ->
           case Item.stop(spec) do
             {:ok, newspec} ->
               instances = Map.put state.instances, newspec.ref, newspec

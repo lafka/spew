@@ -92,6 +92,9 @@ defmodule Spew.Plugin do
       {:error, err} ->
         {:error, {plugin, err}}
 
+      :ignore ->
+        init2 caller, opts, rest, plugins
+
       res ->
         {:error, {:invalid_return, res, {:plugin, plugin}}}
     end
