@@ -1,5 +1,8 @@
 use Mix.Config
 
+config :logger, :console,
+  format: "$time $metadata[$level] $levelpad$message\n",
+  metadata: [:node]
 
 config :spew, :spewroot, spewroot = "/tmp/spew"
 config :spew, :buildpath, ["#{spewroot}/build", "~/.spew/builds"]
