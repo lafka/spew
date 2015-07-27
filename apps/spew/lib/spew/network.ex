@@ -449,19 +449,7 @@ defmodule Spew.Network do
 
     def init(opts) do
       cluster = opts[:cluster] || @cluster
-
-      state = case Cluster.call cluster, :cluster_state do
-        {:ok, currentstate} ->
-          currentstate
-
-        {:error, {:notfound, {:cluster, _}}} ->
-          %State{name: opts[:name] || node, cluster: cluster}
-
-        {:error, {:no_members, {:cluster, _}}} ->
-          %State{name: opts[:name] || node, cluster: cluster}
-      end
-
-      :ok = Cluster.join cluster, self
+      state = Cluster.init(cluster) || %State{name: opts[:name] || node, cluster: cluster}
 
       networks = Enum.reduce opts[:networks] || [],
                              state.networks, fn

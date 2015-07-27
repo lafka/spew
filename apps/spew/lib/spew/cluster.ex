@@ -15,6 +15,8 @@ defmodule Spew.Cluster do
 
   require Logger
 
+  @type t :: String.t
+
   def __using__(opts) do
     synckeys = opts[:synckeys] || false
 
@@ -147,5 +149,22 @@ defmodule Spew.Cluster do
     Logger.debug "cluster[#{cluster}]: sync state"
     :ok = abcast cluster, {:cluster_update, newstate}
     newstate
+  end
+
+  def init(cluster) do
+    state = case call cluster, :cluster_state do
+      {:ok, currentstate} ->
+        currentstate
+
+      {:error, {:notfound, {:cluster, _}}} ->
+        nil
+
+      {:error, {:no_members, {:cluster, _}}} ->
+        nil
+    end
+
+    :ok = join cluster, self
+
+    state
   end
 end
