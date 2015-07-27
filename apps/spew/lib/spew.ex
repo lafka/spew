@@ -16,7 +16,37 @@ defmodule Spew do
     ]
 
     opts = [strategy: :one_for_one, name: Spewhost.Supervisor]
-    Supervisor.start_link(children, opts)
+    sup = Supervisor.start_link(children, opts)
+
+    :ok = start_node
+
+    sup
+  end
+
+  def start_node do
+    dir = Path.join(Application.get_env(:spew, :spewroot), "cluster")
+    file = Path.join(dir, "hostname")
+    case File.read Path.join(dir, file) do
+      {:ok, name} ->
+        start_node2 :"#{name}"
+
+      {:error, :enoent} ->
+        name = :crypto.strong_rand_bytes(8)
+          |> Base.encode16
+          |> String.downcase
+
+        File.mkdir_p! dir
+        File.write file, name
+        start_node2 :"#{name}"
+    end
+  end
+
+  def start_node2(name) do
+    case Node.start name do
+      {:ok, _} -> :ok
+      {:error, _} = err ->
+        err
+    end
   end
 
   def root do
