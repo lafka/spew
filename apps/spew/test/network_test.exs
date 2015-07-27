@@ -26,7 +26,7 @@ defmodule SpewNetworkTest do
 
 
   test "auto-add networks", ctx do
-    initopts = [networks: [%Network{name: "auto-add"}]]
+    initopts = [networks: [%Network{name: "auto-add"}], cluster: "#{ctx[:test]}"]
     {:ok, server} = Server.start_link name: :"#{ctx[:test]}", init: initopts
 
     assert {:ok, [%Network{name: "auto-add"}]} = Network.networks server
@@ -40,7 +40,7 @@ defmodule SpewNetworkTest do
                        ranges: ["fe00::a:1/48#59"]}
 
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
     {:ok, [network]} = Network.networks server
 
     {:ok, slice} = Network.delegate network.ref, [owner: "slice"], server
@@ -59,7 +59,7 @@ defmodule SpewNetworkTest do
     network = %Network{name: name,
                        ranges: ["fe00::b:1/48#59"]}
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
     {:ok, [network]} = Network.networks server
     {:ok, slice} = Network.delegate network.ref, [owner: "slice"], server
 
@@ -90,7 +90,7 @@ defmodule SpewNetworkTest do
     network = %Network{name: name,
                        ranges: ["#{range}#127", "fe00::d:1/48#59"]}
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start_link name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
     {:ok, [network]} = Network.networks server
 
     {:ok, _slice1} = Network.delegate network.ref, [owner: "slice-1"], server
@@ -105,7 +105,7 @@ defmodule SpewNetworkTest do
     network = %Network{name: name,
                        ranges: ["fe00::e:1/125#126"]}
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start_link name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
     {:ok, [network]} = Network.networks server
     {:ok, slice} = Network.delegate network.ref, [owner: "slice-1"], server
     {ip, mask} = hd slice.ranges
@@ -126,7 +126,7 @@ defmodule SpewNetworkTest do
     network = %Network{name: name,
                        ranges: ["#{range}#30", "172.20.1.0/24#27"]}
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start_link name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
     {:ok, [network]} = Network.networks server
     {:ok, slice} = Network.delegate network.ref, [owner: "slice-1"], server
     {ip, mask} = hd slice.ranges
@@ -142,7 +142,7 @@ defmodule SpewNetworkTest do
                        ranges: ["fe00::f:1/48#59"]}
 
 
-    {:ok, server} = Server.start name: ctx[:test], init: [networks: [network]]
+    {:ok, server} = Server.start_link name: ctx[:test], init: [networks: [network], cluster: "#{ctx[:test]}"]
 
     {:ok, [%Network{ref: "net-" <> iface} = network]} = Network.networks server
 

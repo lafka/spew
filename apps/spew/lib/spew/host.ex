@@ -4,10 +4,12 @@ defmodule Spew.Host do
   """
 
   alias Spew.Cluster
+  alias Spew.Network
 
   defstruct hostname: "localhost",
             node: nil,
-            up?: false
+            up?: false,
+            networks: []
 
   @type hostname :: String.t
   @type t :: %__MODULE__{
@@ -43,13 +45,28 @@ defmodule Spew.Host do
   def add(hostname, server \\ @cluster), do:
     Cluster.call(server, {:add, hostname})
 
-
   @doc """
   Removes a down'ed host
   """
   @spec remove(hostname, Cluster.t | pid | atom) :: {:ok, t} | {:error, term()}
   def remove(hostname, server \\ @cluster), do:
     Cluster.call(server, {:remove, hostname})
+
+  @doc """
+  Join host to a network
+  """
+  @spec netjoin(hostname, Network.network, Cluster.t | pid | atom) :: {:ok, t} | {:error, term}
+  def netjoin(hostname, network, opts, server \\ @cluster) do
+    Cluster.call(server, {:netjoin, hostname, network, opts})
+  end
+
+  @doc """
+  Remove host from a network
+  """
+  @spec netleave(hostname, Network.network, Cluster.t | pid | atom) :: {:ok, t} | {:error, term}
+  def netleave(hostname, network, opts, server \\ @cluster) do
+    Cluster.call(server, {:netleave, hostname, network, opts})
+  end
 
   defmodule Server do
     use GenServer
@@ -127,6 +144,62 @@ defmodule Spew.Host do
 
         %Host{up?: false} ->
           {:reply, {:error, {:hostup, {:host, hostname}}}, state}
+      end
+    end
+
+    def handle_call({:netjoin, hostname, network, opts}, _from, state) do
+      net = Network.get network, opts[Spew.Network.Server]
+      network? = match? {:ok, _}, net
+
+      case state.hosts[hostname] do
+        nil ->
+          {:reply, {:error, {:notfound, {:host, hostname}}}, state}
+
+        _ when false === network? ->
+          {:reply, {:error, {:notfound, {:network, network}}}, state}
+
+        %Host{networks: networks} = host when network? ->
+          if Enum.member?(networks, network) do
+            {:reply, :ok, state}
+          else
+
+            case Network.delegate network, [owner: hostname], opts[Spew.Network.Server] do
+              {:ok, slice} ->
+                Logger.debug "host[#{hostname}]: delegated network slice #{slice.ref}"
+                hosts = Map.put state.hosts, hostname, %{host | networks: [network | networks]}
+                newstate = Cluster.sync state.cluster, %{state | hosts: hosts}
+
+                {:reply, :ok, newstate}
+
+              {:error, _} = err ->
+                err
+            end
+          end
+      end
+    end
+
+    def handle_call({:netleave, hostname, network, opts}, _from, state) do
+      net = Network.get network, opts[Spew.Network.Server]
+      network? = match? {:ok, _}, net
+
+      case state.hosts[hostname] do
+        nil ->
+          {:reply, {:error, {:notfound, {:host, hostname}}}, state}
+
+        # If the slice still have active allocations the allocations will be
+        # kept along with the inactive slice. This is handled by
+        # network.deallocate
+        %Host{networks: networks} = host ->
+          slices = Network.slices "host-" <> hostname, opts[Spew.Network.Server]
+
+          Enum.each slices, fn(%{ref: ref}) ->
+            Logger.debug "host[#{hostname}]: undelegated network slice #{ref}"
+            {:ok, _} = Network.undelegate ref, opts[Spew.Network.Server]
+          end
+
+          hosts = Map.put state.hosts, hostname, %{host | networks: networks -- [network]}
+          newstate = Cluster.sync state.cluster, %{state | hosts: hosts}
+          {:reply, :ok, newstate}
       end
     end
 

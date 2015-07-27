@@ -93,7 +93,8 @@ defmodule Spew.Network do
   Get a network definition
   """
   @spec get(network, GenServer.server) :: {:ok, t} | {:error, term}
-  def get("net-" <> network, server \\ @name) do
+  def get("net-" <> _network = ref, nil), do: get(ref, @name)
+  def get("net-" <> network, server) do
     Cluster.call server, {:get, network}
   end
 
@@ -134,6 +135,8 @@ defmodule Spew.Network do
     * `iface :: String.t | nil` The interface name to use, defaults to networks iface
   """
   @spec delegate(network, term, GenServer.server) :: {:ok, Spew.Network.Slice.t} | {:error, term}
+  def delegate(network, opts), do: delegate(network, opts, @name)
+  def delegate(network, opts, nil), do: delegate(network, opts, @name)
   def delegate("net-" <> network, opts, server \\ @name) do
     Cluster.call server, {:delegate, network, opts}
   end
@@ -162,11 +165,23 @@ defmodule Spew.Network do
   end
 
   @doc """
-  List Network Slices
+  List Network Slices by their owning entity or by network reference
   """
   @spec slices(network, GenServer.server) :: {:ok, [t]} | {:error, term}
-  def slices("net-" <> network, server \\ @name) do
-    Cluster.call server, {:slices, network}
+  def slices(ref), do: slices(ref, @server)
+  def slices("net-" <> network, server), do: Cluster.call(server, {:slices, network})
+  def slices("host-" <> host, server) do
+    case networks server do
+      {:ok, networks} ->
+        Enum.flat_map networks, fn(network) ->
+          Enum.filter_map network.slices,
+            fn({_, slice}) -> slice.owner === host end,
+            fn({_, slice}) -> slice end
+        end
+
+      {:error, _} = err ->
+        err
+    end
   end
 
 
@@ -774,16 +789,21 @@ defmodule Spew.Network do
           {:ok, %Network{ref: "net-" <> netref} = network}
             = State.getbyref "net-" <> allocref, newstate
 
+          # Host.netleave assumes that inactive slices are cleanuped when there
+          # are no more allocations, ensure that still stands.
           iface = slice.iface || network.iface || netref
-          case {map_size(slice.allocations), slice.active} do
+          newstate = case {map_size(slice.allocations), slice.active} do
             {0, true} ->
               Iface.remove_addrs iface, slice.ranges
+              newstate
 
             {0, false} ->
               Iface.remove_bridge iface
+              {:ok, newstate} = State.putbyref slice.ref, nil, newstate
+              newstate
 
             _ ->
-              :ok
+              newstate
           end
 
           newstate = Cluster.sync state.cluster, newstate
