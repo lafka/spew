@@ -146,7 +146,6 @@ defmodule Spew.Cluster do
   Simple sync mechanism that syncs the state to all nodes in the cluster
   """
   def sync(cluster, newstate) do
-    Logger.debug "cluster[#{cluster}]: sync state"
     :ok = abcast cluster, {:cluster_update, newstate}
     newstate
   end
