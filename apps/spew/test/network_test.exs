@@ -176,4 +176,41 @@ defmodule SpewNetworkTest do
     assert {:error, {:notfound, {:iface, ^iface}}} = Iface.stats iface
   end
 
+
+  test "cluster test", ctx do
+    network = %Network{name: "#{ctx[:test]}",
+                       ranges: ["fe00::f:1/48#59"]}
+
+
+    cluster = "#{ctx[:test]}"
+    {:ok, server1} = Server.start name: :"#{ctx[:test]}-1", init: [cluster: cluster, networks: [network]]
+    {:ok, server2} = Server.start name: :"#{ctx[:test]}-2", init: [cluster: cluster]
+
+    assert Network.networks(server1) === Network.networks(server2)
+    {:ok, [network]} = Network.networks cluster
+
+    {:ok, slice} = Network.delegate network.ref, [owner: "slice"], cluster
+    :timer.sleep 500
+    assert Network.networks(server1) === Network.networks(server2)
+
+    {:ok, alloc1} = Network.allocate slice.ref, "addr-1", server1
+    {:ok, alloc2} = Network.allocate slice.ref, "addr-2", server2
+
+    assert Network.networks(server1) === Network.networks(server2)
+
+    assert {:error, {:conflict, {:allocations, [alloc1.ref]}, slice.ref}} == Network.allocate slice.ref, "addr-1", cluster
+
+    assert {:ok, alloc1} == Network.allocation alloc1.ref,cluster
+    assert {:ok, alloc2} == Network.allocation alloc2.ref, cluster
+
+    assert {:ok, Enum.sort([alloc1, alloc2])} == Network.allocations network.ref, cluster
+    assert {:ok, Enum.sort([alloc1, alloc2])} == Network.allocations slice.ref, cluster
+
+    assert {:ok, %{alloc1 | state: :inactive}} == Network.deallocate alloc1.ref, cluster
+
+    assert {:ok, [alloc2]} == Network.allocations network.ref, cluster
+    assert {:ok, [alloc2]} == Network.allocations slice.ref, cluster
+
+    assert Network.networks(server1) === Network.networks(server2)
+  end
 end

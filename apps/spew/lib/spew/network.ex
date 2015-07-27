@@ -28,6 +28,8 @@ defmodule Spew.Network do
   """
 
   alias Spew.Utils
+  alias Spew.Cluster
+
   alias __MODULE__
 
   @name __MODULE__.Server
@@ -83,7 +85,7 @@ defmodule Spew.Network do
   """
   @spec create(%Network{}, GenServer.server) :: {:ok, %Network{}} | {:error, term}
   def create(%Network{} = network, server \\ @name) do
-    GenServer.call server, {:create, network}
+    Cluster.call server, {:create, network}
   end
 
 
@@ -92,7 +94,7 @@ defmodule Spew.Network do
   """
   @spec get(network, GenServer.server) :: {:ok, t} | {:error, term}
   def get("net-" <> network, server \\ @name) do
-    GenServer.call server, {:get, network}
+    Cluster.call server, {:get, network}
   end
 
   @doc """
@@ -100,7 +102,7 @@ defmodule Spew.Network do
   """
   @spec get_by_name(String.t, GenServer.server) :: {:ok, t} | {:error, term}
   def get_by_name(netname, server \\ @name) do
-    GenServer.call server, {:get_by_name, netname}
+    Cluster.call server, {:get_by_name, netname}
   end
 
   @doc """
@@ -110,7 +112,7 @@ defmodule Spew.Network do
   """
   @spec delete(network, GenServer.server) :: :ok | {:error, term}
   def delete("net-" <> network, server \\ @name) do
-    GenServer.call server, {:delete, network}
+    Cluster.call server, {:delete, network}
   end
 
 
@@ -119,39 +121,8 @@ defmodule Spew.Network do
   """
   @spec networks(GenServer.server) :: {:ok, [t]} | {:error, term}
   def networks(server \\ @name) do
-    GenServer.call server, :list
+    Cluster.call server, :list
   end
-
-
-#  @doc """
-#  Join GenServer identified by `serverref` to `network`, if such network exists
-#  """
-#  @spec join(GenServer.server, network, GenServer.server) :: :ok | {:error, term}
-#  def join(remoteserver, "net-" <> network, server  \\ @name) do
-#    GenServer.call server, {:join, remoteserver, network}
-#  end
-#
-#
-#  @doc """
-#  Remove `serverref_or_pid` from `network`, if such network exists
-#  """
-#  @spec leave(String.t | GenServer.server, network, GenServer.server) :: :ok | {:error, term}
-#  def leave(serverref_or_pid, "net-" <> network, server  \\ @name) do
-#    GenServer.call server, {:leave, serverref_or_pid, network}
-#  end
-#
-#  @doc """
-#  Show status of siblings server for `network`
-#
-#  The returned map will show %{ serverref => :ok | :down } where :ok
-#  means no down message have been received yet.
-#  """
-#  @spec cluster(network,  GenServer.server) :: {:ok, %{}} | {:error, term}
-#  def cluster("net-" <> network, server \\ @name) do
-#    GenServer.call server, {:cluster, network}
-#  end
-#
-
 
 
   @doc """
@@ -164,7 +135,7 @@ defmodule Spew.Network do
   """
   @spec delegate(network, term, GenServer.server) :: {:ok, Spew.Network.Slice.t} | {:error, term}
   def delegate("net-" <> network, opts, server \\ @name) do
-    GenServer.call server, {:delegate, network, opts}
+    Cluster.call server, {:delegate, network, opts}
   end
 
 
@@ -179,7 +150,7 @@ defmodule Spew.Network do
   """
   @spec undelegate(Spew.Network.Slice.slice, GenServer.server) :: :ok | {:error, term}
   def undelegate("slice-" <> slice, server \\ @name) do
-    GenServer.call server, {:undelegate, slice}
+    Cluster.call server, {:undelegate, slice}
   end
 
   @doc """
@@ -187,7 +158,7 @@ defmodule Spew.Network do
   """
   @spec slice(Spew.Network.Slice.slice, GenServer.server) :: {:ok, [t]} | {:error, term}
   def slice("slice-" <> slice, server \\ @name) do
-    GenServer.call server, {:getslice, slice}
+    Cluster.call server, {:getslice, slice}
   end
 
   @doc """
@@ -195,7 +166,7 @@ defmodule Spew.Network do
   """
   @spec slices(network, GenServer.server) :: {:ok, [t]} | {:error, term}
   def slices("net-" <> network, server \\ @name) do
-    GenServer.call server, {:slices, network}
+    Cluster.call server, {:slices, network}
   end
 
 
@@ -210,7 +181,7 @@ defmodule Spew.Network do
   """
   @spec allocate(Spew.Network.Slice.slice, Spew.Network.Allocation.owner, GenServer.server) :: {:ok, Spew.Network.Allocation.t} | {:error, term}
   def allocate("slice-" <> slice, owner, server \\ @name) do
-    GenServer.call server, {:allocate, slice, owner}
+    Cluster.call server, {:allocate, slice, owner}
   end
 
 
@@ -223,7 +194,7 @@ defmodule Spew.Network do
   """
   @spec deallocate(Spew.Network.Allocation.allocation, GenServer.server) :: :ok | {:error, term}
   def deallocate("allocation-" <> allocation, server \\ @name) do
-    GenServer.call server, {:deallocate, allocation}
+    Cluster.call server, {:deallocate, allocation}
   end
 
   @doc """
@@ -231,7 +202,7 @@ defmodule Spew.Network do
   """
   @spec allocation(Spew.Network.Allocation.allocation, GenServer.server) :: {:ok, Spew.Network.Allocation.t} | {:error, term}
   def allocation("allocation-" <> allocref, server \\ @name) do
-    GenServer.call server, {:get_allocation, allocref}
+    Cluster.call server, {:get_allocation, allocref}
   end
 
   @doc """
@@ -240,10 +211,10 @@ defmodule Spew.Network do
   @spec allocations(Spew.Network.network | Spew.Network.Slice.slice, GenServer.server) :: {:ok, [Spew.Network.Allocation.t]} | {:error, term}
   def allocations(ref), do: allocations(ref, @name)
   def allocations("slice-" <> sliceref, server) do
-    GenServer.call server, {:allocations, :slice, sliceref}
+    Cluster.call server, {:allocations, :slice, sliceref}
   end
   def allocations("net-" <> netref, server) do
-    GenServer.call server, {:allocations, :network, netref }
+    Cluster.call server, {:allocations, :network, netref }
   end
 
 
@@ -260,7 +231,8 @@ defmodule Spew.Network do
         * `:networks :: %{ Spew.Network.network => Spew.Network.t}` - The network definitions
       """
       defstruct name: nil,
-                networks: %{}
+                networks: %{},
+                cluster: nil
 
       @type t :: %__MODULE__{}
 
@@ -448,6 +420,9 @@ defmodule Spew.Network do
     end
 
     use GenServer
+    use Spew.Cluster, synckeys: [:networks]
+
+    alias Spew.Cluster
 
     alias Spew.Network
     alias Spew.Network.Slice
@@ -456,39 +431,69 @@ defmodule Spew.Network do
     require Logger
 
     @name __MODULE__
+    @cluster "network"
 
     def start(opts \\ []) do
       name = opts[:name] || @name
-      initopts = opts[:init] || []
+      initopts = Dict.put(opts[:init] || [], :name, name)
 
       GenServer.start __MODULE__,  initopts, [name: name]
     end
 
     def start_link(opts \\ []) do
       name = opts[:name] || @name
-      initopts = opts[:init] || []
+      initopts = Dict.put(opts[:init] || [], :name, name)
 
       GenServer.start_link __MODULE__,  initopts, [name: name]
     end
 
     def init(opts) do
+      cluster = opts[:cluster] || @cluster
+
+      state = case Cluster.call cluster, :cluster_state do
+        {:ok, currentstate} ->
+          currentstate
+
+        {:error, {:notfound, {:cluster, _}}} ->
+          %State{name: opts[:name] || node, cluster: cluster}
+
+        {:error, {:no_members, {:cluster, _}}} ->
+          %State{name: opts[:name] || node, cluster: cluster}
+      end
+
+      :ok = Cluster.join cluster, self
+
       networks = Enum.reduce opts[:networks] || [],
-                             %State{}.networks, fn
-                              (%Network{} = network, acc) ->
-                                ref = Network.genref network.name, false
-                                extref = Network.genref network.name, true
+                             state.networks, fn
+        (%Network{} = network, acc) ->
+          ref = Network.genref network.name, false
+          if acc[ref] do
+            acc # keep previous definition
+          else
+            extref = Network.genref network.name, true
+            ranges = Enum.map network.ranges, &Slice.parserange/1
+            Map.put acc, ref, %{network | ref: extref, ranges: ranges}
+          end
 
-                                ranges = Enum.map network.ranges, &Slice.parserange/1
+        (term, acc) ->
+          Logger.warn "network[]: invalid network spec: #{inspect term}"
+          acc
+        end
 
-                                Map.put acc, ref, %{network | ref: extref, ranges: ranges}
+      {:ok, %State{state | name: opts[:name] || node,
+                           networks: networks}}
+    end
 
-                              (term, acc) ->
-                                Logger.warn "network[]: invalid network spec: #{inspect term}"
-                                acc
-                              end
+    synckeys = [:networks]
+    def handle_cast({:cluster_update, newstate}, oldstate) do
+      r = Enum.reduce unquote(synckeys), oldstate, fn(k, acc) ->
+        Map.put acc, k, Map.get(newstate, k)
+      end
+      {:noreply, r}
+    end
 
-      {:ok, %State{name: opts[:name] || node,
-                   networks: networks}}
+    def handle_call(:cluster_state, _from, currentstate) do
+      {:reply, {:ok, currentstate}, currentstate}
     end
 
 
@@ -569,9 +574,10 @@ defmodule Spew.Network do
            state}
 
         %Network{slices: slices} when slices == %{} ->
+          newstate = Cluster.sync state.cluster, %{state | networks: Map.delete(networks, ref)}
           {:reply,
            :ok,
-           %{state | networks: Map.delete(networks, ref)}}
+           newstate}
 
         %Network{slices: _slices} ->
           {:reply,
@@ -618,10 +624,12 @@ defmodule Spew.Network do
               case collisions do
                 [] ->
                   network = %{network | slices: Map.put(network.slices, sliceref, slice)}
+                  newstate = Cluster.sync state.cluster,
+                                          %{state | networks: Map.put(networks, netref, network)}
 
                   {:reply,
                     {:ok, slice},
-                    %{state | networks: Map.put(networks, netref, network)}}
+                    newstate}
 
                 collisions ->
                   {:reply,
@@ -654,12 +662,16 @@ defmodule Spew.Network do
           Iface.remove_bridge iface
 
           {:ok, %State{} = newstate} = State.putbyref slice.ref, nil, state
+          newstate = Cluster.sync state.cluster, newstate
+
           {:reply,
            {:ok, %{slice | active: false}},
            newstate}
 
         {:ok, %Slice{} = slice} ->
           {:ok, %State{} = newstate} = State.putbyref slice.ref, %{slice | active: false}, state
+          newstate = Cluster.sync state.cluster, newstate
+
           {:reply,
            {:ok, %{slice | active: false}},
            newstate}
@@ -719,6 +731,8 @@ defmodule Spew.Network do
               case Iface.ensure_bridge iface, slice.ranges do
                 :ok ->
                   {:ok, newstate} = State.putbyref allocation.ref, allocation, state
+                  newstate = Cluster.sync state.cluster, newstate
+
                   {:reply,
                    {:ok, allocation},
                    newstate}
@@ -783,6 +797,8 @@ defmodule Spew.Network do
             _ ->
               :ok
           end
+
+          newstate = Cluster.sync state.cluster, newstate
 
           {:reply,
            {:ok, Allocation.disable(alloc)},
